@@ -1,0 +1,22 @@
+[package]
+name = "immich-ohos-napi"
+version = "0.1.0"
+edition = "2021"
+description = "Thin N-API FFI bridge for Immich HarmonyOS NEXT client"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+immich-core = { path = "../immich-core" }
+napi-ohos = { version = "1.2.0", default-features = false, features = ["napi4", "tokio_rt"] }
+napi-derive-ohos = "1.2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["sync"] }
+
+[build-dependencies]
+napi-build-ohos = "1.2.0"

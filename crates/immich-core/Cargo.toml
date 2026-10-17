@@ -1,0 +1,19 @@
+[package]
+name = "immich-core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-agnostic Rust core for Immich HarmonyOS NEXT client"
+license = "MIT"
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "sync"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+futures-util = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

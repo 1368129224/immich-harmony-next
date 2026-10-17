@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/immich-core",
+    "crates/immich-ohos-napi",
+]
+default-members = ["crates/immich-core"]
+resolver = "2"

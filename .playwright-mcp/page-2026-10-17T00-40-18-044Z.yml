@@ -1,0 +1,487 @@
+- generic [active] [ref=f3e1]:
+  - banner [ref=f3e8]:
+    - link [ref=f3e9] [cursor=pointer]:
+      - /url: /consumer/cn/
+      - img "img" [ref=f3e10]
+    - generic:
+      - generic:
+        - generic [ref=f3e12]:
+          - generic: 简体中文
+          - generic: English
+        - generic [ref=f3e13]:
+          - generic:
+            - generic [ref=f3e14]: 我的
+            - generic [ref=f3e15] [cursor=pointer]
+          - generic [ref=f3e20]:
+            - generic:
+              - paragraph: Hello，
+              - paragraph: 欢迎来到开发者联盟
+          - generic:
+            - list:
+              - listitem [ref=f3e21] [cursor=pointer]:
+                - generic [ref=f3e22]: 我的学堂
+              - listitem [ref=f3e23] [cursor=pointer]:
+                - generic [ref=f3e24]: 我的收藏
+              - listitem [ref=f3e25] [cursor=pointer]:
+                - generic [ref=f3e26]: 我的活动
+              - listitem [ref=f3e27] [cursor=pointer]:
+                - generic [ref=f3e28]: 我的工单
+          - generic: 立即登录
+      - generic [ref=f3e29]:
+        - generic [ref=f3e30]:
+          - link "探索" [ref=f3e33] [cursor=pointer]:
+            - /url: /consumer/cn/discover/
+          - link "设计" [ref=f3e37] [cursor=pointer]:
+            - /url: /consumer/cn/design/
+          - link "开发" [ref=f3e41] [cursor=pointer]:
+            - /url: /consumer/cn/develop/
+          - link "分发" [ref=f3e45] [cursor=pointer]:
+            - /url: /consumer/cn/distribute/
+          - link "推广与变现" [ref=f3e49] [cursor=pointer]:
+            - /url: /consumer/cn/promote/
+          - link "生态合作" [ref=f3e53] [cursor=pointer]:
+            - /url: /consumer/cn/cooperate/
+          - link "支持" [ref=f3e57] [cursor=pointer]:
+            - /url: /consumer/cn/support/
+        - generic [ref=f3e59]:
+          - link "文档" [ref=f3e62] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/doc/doccenter
+          - link "App" [ref=f3e65] [cursor=pointer]:
+            - /url: /consumer/cn/huawei-app/
+    - generic [ref=f3e72]: AI 助手
+    - generic [ref=f3e76]:
+      - textbox "输入关键字搜索" [ref=f3e77]
+      - generic [ref=f3e78] [cursor=pointer]
+  - generic [ref=f3e81]:
+    - generic [ref=f3e87]:
+      - heading [level=4] [ref=f3e89]:
+        - link "DevEco Studio" [ref=f3e90] [cursor=pointer]:
+          - /url: https://developer.huawei.com/consumer/cn/deveco-studio/
+      - generic [ref=f3e91]:
+        - generic [ref=f3e92]: 概览
+        - link "下载" [ref=f3e100] [cursor=pointer]:
+          - /url: https://developer.huawei.com/consumer/cn/download/
+    - generic [ref=f3e106]:
+      - generic [ref=f3e107]:
+        - img "DevEco Studio" [ref=f3e108]
+        - generic [ref=f3e109]: DevEco Studio
+        - generic [ref=f3e111]: 开发 HarmonyOS 应用及元服务的集成开发环境（IDE），提供 AI 辅助编程、编译构建、UI 实时预览、代码调试、性能调优、模拟器等功能，帮助你高效开发鸿蒙应用及元服务。
+        - link "立即下载" [ref=f3e114] [cursor=pointer]:
+          - /url: https://developer.huawei.com/consumer/cn/download/
+      - img "DevEco Studio" [ref=f3e116]
+    - link [ref=f3e126] [cursor=pointer]:
+      - /url: https://developer.huawei.com/consumer/cn/deveco-studio/resources/
+      - generic [ref=f3e127]:
+        - img "鸿蒙开发资源" [ref=f3e128]
+        - paragraph [ref=f3e129]: 获取最新资源
+        - paragraph [ref=f3e130]: 了解 DevEco Studio，高效开发鸿蒙应用及元服务。
+      - button "了解详情" [ref=f3e132]
+    - generic [ref=f3e138]:
+      - generic [ref=f3e140]:
+        - generic [ref=f3e141]:
+          - img "img" [ref=f3e142]
+          - generic [ref=f3e143]: 鸿蒙电脑 DevEco Studio 公测版
+          - generic [ref=f3e144]: 基于毕方技术平台构建的 HarmonyOS 应用集成开发环境，提供代码编辑、编译构建、代码调试、性能调优、多设备预览等能力，并集成 AI Agent 工具，帮助你高效开发 HarmonyOS 应用。（请前往鸿蒙电脑应用市场-我的-应用尝鲜安装体验）
+          - link "了解详情" [ref=f3e146] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/deveco-studio-harmonyos/
+        - img "CodeGenie" [ref=f3e148]
+      - generic [ref=f3e150]:
+        - generic [ref=f3e151]:
+          - img "img" [ref=f3e152]
+          - generic [ref=f3e153]: DevEco Code
+          - generic [ref=f3e154]: 开箱即用的 HarmonyOS 应用开发专属 AI Agent，覆盖代码生成、问题修复、编译构建、功能验证等开发旅程，通过自然语言快速开发 HarmonyOS 应用。 安装指令：npm install -g @deveco/deveco-code
+          - link "查看文档" [ref=f3e156] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-deveco-code
+        - img "CodeGenie" [ref=f3e158]
+      - generic [ref=f3e160]:
+        - generic [ref=f3e161]:
+          - img "img" [ref=f3e162]
+          - generic [ref=f3e163]: DevEco CLI
+          - generic [ref=f3e164]: 提供 HarmonyOS 应用开发原子化能力，包含工具集、官方知识库和精品 Skills，覆盖工程创建、语法检查、编译构建、运行验证等场景，更好地适配业界 AI Agent 开发 HarmonyOS 应用。 安装指令：npm install -g @deveco/deveco-cli
+          - link "查看文档" [ref=f3e166] [cursor=pointer]:
+            - /url: "https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-deveco-cli "
+        - img "CodeGenie" [ref=f3e168]
+    - generic [ref=f3e173]:
+      - generic [ref=f3e174]: 新增特性
+      - generic [ref=f3e176]:
+        - generic [ref=f3e177]:
+          - generic [ref=f3e179]:
+            - generic:             
+            - generic [ref=f3e180]:
+              - generic [ref=f3e181]: 状态变量开发调试
+              - generic [ref=f3e182]: 支持 ArkUI 状态变量绑定关系一键查看，以及调试过程中状态变量数值变化实时追踪，帮助你快速定位状态变量异常修改、组件异常刷新等问题。
+          - generic [ref=f3e184]:
+            - generic:             
+            - generic [ref=f3e185]:
+              - generic [ref=f3e186]: Code Scanner
+              - generic [ref=f3e187]: Code Scanner 支持对 ArkTS 与 C++ 代码进行深度的内存泄漏静态检测。通过精准分析告警的执行路径，可直接追溯至引发问题的源代码行。使用 Code Scanner 检测在开发早期拦截内存泄露隐患，从而有效减少 App 运行时的内存泄漏问题。
+          - generic [ref=f3e189]:
+            - generic:             
+            - generic [ref=f3e190]:
+              - generic [ref=f3e191]: 应用 Dump 文件解析
+              - generic [ref=f3e192]: 通过 MiniDump 文件解析能力，可高效定位 Native Crash 问题。支持崩溃堆栈、堆栈变量、内存数据的解析，多线程堆栈展示定位死锁问题，一键跳转源码解决崩溃根因。
+          - generic [ref=f3e194]:
+            - generic:             
+            - generic [ref=f3e195]:
+              - generic [ref=f3e196]: 跨语言内存一站式调优
+              - generic [ref=f3e197]: Profiler 工具跨语言内存分析能力增强，新增支持 Native 持有 ArkTS 内存泄露问题分析能力，覆盖 LocalHandle 和 GlobalHandle 两种句柄类型，能够抓取并展示关联 ArkTS 对象的 Native 分配栈，显著提升跨语言内存泄漏问题分析效率。
+          - generic [ref=f3e199]:
+            - generic:             
+            - generic [ref=f3e200]:
+              - generic [ref=f3e201]: 设备投屏
+              - generic [ref=f3e202]: 支持对已连接设备投屏，方便查看设备屏幕内容。支持点击、滑动、键盘字符输入等操作，也可拖拽 HAP/HSP 包和文件，实现应用安装和文件上传。
+          - generic [ref=f3e204]:
+            - generic:             
+            - generic [ref=f3e205]:
+              - generic [ref=f3e206]: Linux 版本模拟器
+              - generic [ref=f3e207]: 新增 Linux 版模拟器，并提供 gRPC 服务接口，支持模拟器批量部署，助力自动化测试执行，提升测试效率。
+          - generic [ref=f3e209]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-publish-app
+              - generic:             
+            - generic [ref=f3e210] [cursor=pointer]:
+              - link [ref=f3e211]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-publish-app
+              - generic [ref=f3e212]: 发布重签名
+              - generic [ref=f3e213]: 支持对本地 App 包进行发布证书重签名，并将签名后的包上传到 AGC，提升开发者应用包上架效率。
+          - generic [ref=f3e215]:
+            - generic:             
+            - generic [ref=f3e216]:
+              - generic [ref=f3e217]: 运维数据监控定位
+              - generic [ref=f3e218]: 实时监控运维数据，Top 聚合列表与趋势分布配合符号表解析一键定位源码；快速锁定稳定性问题与异常根因，保证应用体验稳定性。
+        - generic [ref=f3e219]:
+          - generic [ref=f3e220] [cursor=pointer]
+          - generic [ref=f3e221] [cursor=pointer]
+          - generic [ref=f3e222] [cursor=pointer]
+          - generic [ref=f3e223] [cursor=pointer]
+    - generic [ref=f3e228]:
+      - generic [ref=f3e229]: 关键特性
+      - generic [ref=f3e231]:
+        - generic [ref=f3e232]:
+          - generic [ref=f3e234]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-code-edit
+              - generic:             
+            - generic [ref=f3e235] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e236]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-code-edit
+              - generic [ref=f3e237]: 智能代码编辑
+              - generic [ref=f3e238]: 智能代码编辑为 ArkTS、JS 和 C/C++ 编程语言提供代码高效索引、智能补齐、代码重构等能力，帮助你高效编码。
+          - generic [ref=f3e240]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-previewer-arkui
+              - generic:             
+            - generic [ref=f3e241] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e242]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-previewer-arkui
+              - generic [ref=f3e243]: 多端双向实时预览
+              - generic [ref=f3e244]: 界面预览功能帮助你在 UI 编码时快速预览界面在多种设备上的显示效果，查看组件布局，提升 UI 开发效率。
+          - generic [ref=f3e246]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-build-customization
+              - generic:             
+            - generic [ref=f3e247] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e248]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-build-customization
+              - generic [ref=f3e249]: 灵活构建
+              - generic [ref=f3e250]: 全新的轻量级构建工具 Hvigor，支持源码、资源、构建流程自定义，灵活构建多目标产物。提供任务可视化窗口，一键执行，快速验证；提供 Build Analyzer 助力分析性能瓶颈，持续提升构建效率。
+          - generic [ref=f3e252]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-code-debugging
+              - generic:             
+            - generic [ref=f3e253] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e254]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-code-debugging
+              - generic [ref=f3e255]: 跨语言调试
+              - generic [ref=f3e256]: 支持 ArkTS&C++ 语言调试、汇编调试、lldb 命令调试、反向调试、内存视图分析、智能跳转和数据断点等丰富调试能力。
+          - generic [ref=f3e258]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-insight-description
+              - generic:             
+            - generic [ref=f3e259] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e260]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-insight-description
+              - generic [ref=f3e261]: 多场景深度调优
+              - generic [ref=f3e262]: Profiler 调优工具支持分析多种场景应用性能问题，包括内存泄漏、组件耗时、网络请求、应用启动、界面卡顿等。提供可视化泳道图帮助你优化 HarmonyOS 应用性能。
+          - generic [ref=f3e264]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-app-analyzer
+              - generic:             
+            - generic [ref=f3e265] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e266]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-app-analyzer
+              - generic [ref=f3e267]: 应用与元服务体检
+              - generic [ref=f3e268]: 使用体检工具在开发阶段发现可能影响上架的兼容性、性能、功耗、稳定性等问题，并支持场景化检测，帮助你提升应用基础体验及上架成功率。
+          - generic [ref=f3e270]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-emulator-create
+              - generic:             
+            - generic [ref=f3e271] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e272]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-emulator-create
+              - generic [ref=f3e273]: 本地模拟器
+              - generic [ref=f3e274]: 提供手机、折叠屏、平板、座舱模拟器，可以帮助你在各种 HarmonyOS 设备上调测应用，以更好地适配不同的机型和 HarmonyOS 版本。
+          - generic [ref=f3e276]:
+            - link:
+              - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-emulator-more-features
+              - generic:             
+            - generic [ref=f3e277] [cursor=pointer]:
+              - link "卡片链接" [ref=f3e278]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-emulator-more-features
+              - generic [ref=f3e279]: 硬件场景模拟
+              - generic [ref=f3e280]: 利用模拟器的硬件场景模拟能力，你可以轻松地模拟 GPS 定位变化、驾驶导航、低电量等应用场景，更方便地进行特定场景下的功能调试。
+        - generic [ref=f3e281]:
+          - generic [ref=f3e282] [cursor=pointer]
+          - generic [ref=f3e283] [cursor=pointer]
+          - generic [ref=f3e284] [cursor=pointer]
+          - generic [ref=f3e285] [cursor=pointer]
+    - generic [ref=f3e290]:
+      - generic [ref=f3e291]: 系统要求
+      - generic [ref=f3e293]:
+        - generic [ref=f3e294]:
+          - generic [ref=f3e296]:
+            - paragraph [ref=f3e297]: Windows
+            - paragraph [ref=f3e298]: 操作系统：Windows 10/11 64 位 内存：16GB 及以上 硬盘：100GB 及以上 分辨率：1280*800 像素及以上
+          - img "IDE系统要求" [ref=f3e300]
+        - generic [ref=f3e301]:
+          - generic [ref=f3e303]:
+            - paragraph [ref=f3e304]: macOS
+            - paragraph [ref=f3e305]: 操作系统：macOS(X86) 11/12/13/14/15/26或macOS(ARM) 12/13/14/15/26 内存：8GB 及以上 硬盘：100GB 及以上 分辨率：1280*800 像素及以上
+          - img "IDE系统要求" [ref=f3e307]
+  - generic [ref=f3e312]:
+    - generic [ref=f3e313]:
+      - generic [ref=f3e315]:
+        - text: HarmonyOS Developer
+        - generic [ref=f3e316]: ">"
+        - text: DevEco Studio
+      - generic [ref=f3e317]:
+        - generic [ref=f3e320]:
+          - paragraph [ref=f3e323]: 工具
+          - list [ref=f3e326]:
+            - listitem [ref=f3e327]:
+              - link "ArkTS" [ref=f3e328] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/arkts/
+            - listitem [ref=f3e329]:
+              - link "ArkUI" [ref=f3e330] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/arkui/
+            - listitem [ref=f3e331]:
+              - link "ArkCompiler" [ref=f3e332] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/arkcompiler/
+            - listitem [ref=f3e333]:
+              - link "DevEco Studio" [ref=f3e334] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/deveco-studio/
+            - listitem [ref=f3e335]:
+              - link "DevEco Testing" [ref=f3e336] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/deveco-testing/
+            - listitem [ref=f3e337]:
+              - link "DevEco Device Tool" [ref=f3e338] [cursor=pointer]:
+                - /url: https://device.harmonyos.com/cn/develop/ide
+            - listitem [ref=f3e339]:
+              - link "DevEco Service" [ref=f3e340] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/deveco-service
+            - listitem [ref=f3e341]:
+              - link "仓颉体验版" [ref=f3e342] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/cangjie/
+            - listitem [ref=f3e343]:
+              - link "HarmonyOS Symbol" [ref=f3e344] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/design/harmonyos-symbol
+        - generic [ref=f3e347]:
+          - paragraph [ref=f3e350]: 开放能力
+          - list [ref=f3e353]:
+            - listitem [ref=f3e354]:
+              - link "Account Kit" [ref=f3e355] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/account-kit
+            - listitem [ref=f3e356]:
+              - link "Ads Kit" [ref=f3e357] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/ads-kit
+            - listitem [ref=f3e358]:
+              - link "Core Speech Kit" [ref=f3e359] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/core-speech-kit
+            - listitem [ref=f3e360]:
+              - link "Core Vision Kit" [ref=f3e361] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/core-vision-kit
+            - listitem [ref=f3e362]:
+              - link "IAP Kit" [ref=f3e363] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/iap-kit
+            - listitem [ref=f3e364]:
+              - link "Intents Kit" [ref=f3e365] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/intents-kit
+            - listitem [ref=f3e366]:
+              - link "Location Kit" [ref=f3e367] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/location-kit
+            - listitem [ref=f3e368]:
+              - link "Live View Kit" [ref=f3e369] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/live-view-kit
+            - listitem [ref=f3e370]:
+              - link "Payment Kit" [ref=f3e371] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/payment-kit
+            - listitem [ref=f3e372]:
+              - link "Push Kit" [ref=f3e373] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/push-kit
+            - listitem [ref=f3e374]:
+              - link "Scan Kit" [ref=f3e375] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/sdk/scan-kit
+        - generic [ref=f3e378]:
+          - paragraph [ref=f3e381]: 资源
+          - list [ref=f3e384]:
+            - listitem [ref=f3e385]:
+              - link "文档" [ref=f3e386] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/
+            - listitem [ref=f3e387]:
+              - link "示例代码" [ref=f3e388] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/samples/
+            - listitem [ref=f3e389]:
+              - link "组件" [ref=f3e390] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/market/prod-list/4437348dd20f48249540d1b57ef2eff6/categoryL2_202410080003
+            - listitem [ref=f3e391]:
+              - link "模板" [ref=f3e392] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/market/prod-list/4437348dd20f48249540d1b57ef2eff6/categoryL2_202410080002
+            - listitem [ref=f3e393]:
+              - link "鸿蒙生态伙伴 SDK" [ref=f3e394] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/market/landing/SDK?ha_source=gwyj
+            - listitem [ref=f3e395]:
+              - link "最佳实践" [ref=f3e396] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-best-practices-overview
+            - listitem [ref=f3e397]:
+              - link "下载中心" [ref=f3e398] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/download/
+            - listitem [ref=f3e399]:
+              - link "视频课程" [ref=f3e400] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/training/result?type1=101718934267126043&orderBy=1
+            - listitem [ref=f3e401]:
+              - link "Codelabs" [ref=f3e402] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/codelabsPortal/serviceTypes/43
+            - listitem [ref=f3e403]:
+              - link "考试认证" [ref=f3e404] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/training/dev-certification/a617e0d3bc144624864a04edb951f6c4?ha_source=GWxfk&ha_sourceId=89000474
+            - listitem [ref=f3e405]:
+              - link "行业解决方案" [ref=f3e406] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/solution/harmonyos/?ha_source=gwyj&ha_sourceId=89000071
+            - listitem [ref=f3e407]:
+              - link "开发者月刊" [ref=f3e408] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/monthly/
+        - generic [ref=f3e411]:
+          - paragraph [ref=f3e414]: 支持
+          - list [ref=f3e417]:
+            - listitem [ref=f3e418]:
+              - link "服务公告" [ref=f3e419] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/notice
+            - listitem [ref=f3e420]:
+              - link "支持文档" [ref=f3e421] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/doc/start/introduction-0000001053446472
+            - listitem [ref=f3e422]:
+              - link "AI 助手" [ref=f3e423] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/customerService/#/bot-dev-top/faq-top/faq-talk-top
+            - listitem [ref=f3e424]:
+              - link "社区问答" [ref=f3e425] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/forum/
+            - listitem [ref=f3e426]:
+              - link "在线提单" [ref=f3e427] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/support/feedback/#/
+            - listitem [ref=f3e428]:
+              - link "快速入门" [ref=f3e429] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/develop-novice-guide/
+            - listitem [ref=f3e430]:
+              - link "联系我们" [ref=f3e431] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/support/contactUs
+            - listitem [ref=f3e432]:
+              - link "协议与准则" [ref=f3e433] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/agreement/
+            - listitem [ref=f3e434]:
+              - link "举报中心" [ref=f3e435] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/report
+            - listitem [ref=f3e436]:
+              - link "联盟 APP" [ref=f3e437] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/huawei-app/
+        - generic [ref=f3e440]:
+          - paragraph [ref=f3e443]: Programs
+          - list [ref=f3e446]:
+            - listitem [ref=f3e447]:
+              - link "HUAWEI Developer Groups" [ref=f3e448] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/programs/hdg/
+            - listitem [ref=f3e449]:
+              - link "HUAWEI Developer Experts" [ref=f3e450] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/programs/hde
+            - listitem [ref=f3e451]:
+              - link "HUAWEI Student Developers" [ref=f3e452] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/programs/hsd
+            - listitem [ref=f3e453]:
+              - link "鸿蒙极客" [ref=f3e454] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/programs/harmonyosgeek/
+            - listitem [ref=f3e455]:
+              - link "耀星计划" [ref=f3e456] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/yaoxingActivity/detail/617
+        - generic [ref=f3e459]:
+          - paragraph [ref=f3e462]: 活动
+          - list [ref=f3e465]:
+            - listitem [ref=f3e466]:
+              - link "活动概览" [ref=f3e467] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/
+            - listitem [ref=f3e468]:
+              - link "HUAWEI Developer Day" [ref=f3e469] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/hdd/
+            - listitem [ref=f3e470]:
+              - link "HarmonyOS Tech Talk" [ref=f3e471] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/training/study-path/401748584706136426
+            - listitem [ref=f3e472]:
+              - link "2026 HarmonyOS 创新赛·极客赛道" [ref=f3e473] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/digixActivity/digixcmsdetail/101773710117484023
+            - listitem [ref=f3e474]:
+              - link "华为开发者大会（HDC）" [ref=f3e475] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/hdc/2026/
+            - listitem [ref=f3e476]:
+              - link "鸿蒙应用开发者激励计划 2026" [ref=f3e477] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/harmonyos-incentive/2026?ha_source=yejiao&ha_sourceId=70000006
+            - listitem [ref=f3e478]:
+              - link "鸿蒙高校创新赛" [ref=f3e479] [cursor=pointer]:
+                - /url: https://developer.huawei.com/consumer/cn/activity/incentive/C4
+      - generic [ref=f3e480]:
+        - generic [ref=f3e482]:
+          - generic [ref=f3e483]: 友情链接
+          - generic [ref=f3e485]:
+            - link "华为官网" [ref=f3e486] [cursor=pointer]:
+              - /url: https://www.huawei.com/cn/corporate-information
+            - link "消费者业务网站" [ref=f3e487] [cursor=pointer]:
+              - /url: https://consumer.huawei.com/cn/
+            - link "华为商城" [ref=f3e488] [cursor=pointer]:
+              - /url: https://www.vmall.com/
+            - link "HarmonyOS" [ref=f3e489] [cursor=pointer]:
+              - /url: https://consumer.huawei.com/cn/harmonyos-7/
+            - link "华为终端云空间" [ref=f3e490] [cursor=pointer]:
+              - /url: https://cloud.huawei.com/
+            - link "华为云" [ref=f3e491] [cursor=pointer]:
+              - /url: https://www.huaweicloud.com/
+        - generic [ref=f3e492]:
+          - generic [ref=f3e493]: 简体中文
+          - generic [ref=f3e497]:
+            - img "img" [ref=f3e499] [cursor=pointer]
+            - img "img" [ref=f3e501] [cursor=pointer]
+            - img "img" [ref=f3e503]
+            - img "img" [ref=f3e505]
+            - img "img" [ref=f3e507] [cursor=pointer]
+            - img "img" [ref=f3e509] [cursor=pointer]
+    - generic [ref=f3e511]:
+      - paragraph [ref=f3e514]: 华为开发者联盟 版权所有 ©2026
+      - generic [ref=f3e515]:
+        - generic [ref=f3e516]:
+          - link "问题反馈" [ref=f3e517] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/support/feedback/#/
+          - text: "|"
+        - generic [ref=f3e518]:
+          - link "使用条款" [ref=f3e519] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/devservice/use
+          - text: "|"
+        - generic [ref=f3e520]:
+          - link "华为开发者联盟用户协议" [ref=f3e521] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/doc/start/useragreement-0000001494912825
+          - text: "|"
+        - generic [ref=f3e522]:
+          - link "关于华为开发者联盟与隐私的声明" [ref=f3e523] [cursor=pointer]:
+            - /url: https://developer.huawei.com/consumer/cn/devservice/term
+          - text: "|"
+        - generic [ref=f3e524]:
+          - link "Cookies" [ref=f3e525] [cursor=pointer]:
+            - /url: https://consumer.huawei.com/cn/legal/cookie-policy/
+          - text: "|"
+        - link "开源软件声明" [ref=f3e527] [cursor=pointer]:
+          - /url: https://developer.huawei.com/consumer/cn/opensource/

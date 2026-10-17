@@ -1,0 +1,399 @@
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::adapter::{
+    parse_bucket_response, parse_buckets_response, AdapterError, Asset, BucketInfo,
+    LEGACY_BUCKETS_QUERY, MODERN_BUCKETS_QUERY,
+};
+
+#[derive(Error, Debug)]
+pub enum ClientError {
+    #[error("HTTP request error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Server returned error status {0}: {1}")]
+    ServerStatus(StatusCode, String),
+    #[error("Adapter parsing error: {0}")]
+    Adapter(#[from] AdapterError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("No base URL configured")]
+    MissingBaseUrl,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResponse {
+    pub access_token: Option<String>,
+    pub user_id: Option<String>,
+    pub user_email: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbnailSize {
+    Thumbnail,
+    Preview,
+}
+
+impl ThumbnailSize {
+    pub fn as_query_str(&self) -> &'static str {
+        match self {
+            ThumbnailSize::Thumbnail => "thumbnail",
+            ThumbnailSize::Preview => "preview",
+        }
+    }
+}
+
+pub struct ImmichClient {
+    client: Client,
+    base_url: Option<String>,
+    api_key: Option<String>,
+    access_token: Option<String>,
+}
+
+impl ImmichClient {
+    pub fn new(base_url: Option<String>, api_key: Option<String>) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        let clean_url = base_url.map(|u| u.trim_end_matches('/').to_string());
+
+        Self {
+            client,
+            base_url: clean_url,
+            api_key,
+            access_token: None,
+        }
+    }
+
+    pub fn set_base_url(&mut self, base_url: String) {
+        self.base_url = Some(base_url.trim_end_matches('/').to_string());
+    }
+
+    pub fn set_api_key(&mut self, api_key: String) {
+        self.api_key = Some(api_key);
+    }
+
+    pub fn set_access_token(&mut self, token: String) {
+        self.access_token = Some(token);
+    }
+
+    fn auth_headers(&self) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Some(ref key) = self.api_key {
+            if let Ok(val) = HeaderValue::from_str(key) {
+                headers.insert("x-api-key", val);
+            }
+        }
+        if let Some(ref token) = self.access_token {
+            let auth_str = format!("Bearer {}", token);
+            if let Ok(val) = HeaderValue::from_str(&auth_str) {
+                headers.insert(AUTHORIZATION, val);
+            }
+        }
+        headers
+    }
+
+    fn url(&self, path: &str) -> Result<String, ClientError> {
+        let base = self.base_url.as_ref().ok_or(ClientError::MissingBaseUrl)?;
+        let clean_path = path.trim_start_matches('/');
+        Ok(format!("{}/{}", base, clean_path))
+    }
+
+    /// Verifies server reachability and returns server ping / status info.
+    pub async fn ping(&self) -> Result<bool, ClientError> {
+        let url = self.url("api/server-info/ping")?;
+        let res = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        if res.status().is_success() {
+            return Ok(true);
+        }
+
+        // Try fallback to /api/server/version
+        let v_url = self.url("api/server/version")?;
+        let v_res = self
+            .client
+            .get(&v_url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        Ok(v_res.status().is_success())
+    }
+
+    /// Login with email and password, storing access token on success.
+    pub async fn login(&mut self, email: &str, password: &str) -> Result<LoginResponse, ClientError> {
+        let url = self.url("api/auth/login")?;
+        let body = serde_json::json!({
+            "email": email,
+            "password": password
+        });
+
+        let res = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let login_res: LoginResponse = res.json().await?;
+        if let Some(ref token) = login_res.access_token {
+            self.access_token = Some(token.clone());
+        }
+
+        Ok(login_res)
+    }
+
+    /// Fetches timeline buckets with multi-version fallback.
+    /// Tries modern query first (`visibility=timeline&withPartners=true`),
+    /// falls back to legacy query (`size=MONTH&isArchived=false`) on HTTP 400.
+    pub async fn fetch_buckets(&self) -> Result<Vec<BucketInfo>, ClientError> {
+        let modern_url = self.url(&format!("api/timeline/buckets?{}", MODERN_BUCKETS_QUERY))?;
+        let res = self
+            .client
+            .get(&modern_url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        if res.status() == StatusCode::BAD_REQUEST {
+            // Fallback to legacy query parameters
+            let legacy_url = self.url(&format!("api/timeline/buckets?{}", LEGACY_BUCKETS_QUERY))?;
+            let legacy_res = self
+                .client
+                .get(&legacy_url)
+                .headers(self.auth_headers())
+                .send()
+                .await?;
+
+            if !legacy_res.status().is_success() {
+                let status = legacy_res.status();
+                let text = legacy_res.text().await.unwrap_or_default();
+                return Err(ClientError::ServerStatus(status, text));
+            }
+
+            let text = legacy_res.text().await?;
+            let buckets = parse_buckets_response(&text)?;
+            return Ok(buckets);
+        }
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let text = res.text().await?;
+        let buckets = parse_buckets_response(&text)?;
+        Ok(buckets)
+    }
+
+    /// Fetches all assets within a given time bucket.
+    pub async fn fetch_bucket_assets(&self, time_bucket: &str) -> Result<Vec<Asset>, ClientError> {
+        let encoded_bucket = url_encode(time_bucket);
+        let url = self.url(&format!("api/timeline/bucket?timeBucket={}", encoded_bucket))?;
+
+        let res = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let body_text = res.text().await?;
+        let assets = parse_bucket_response(&body_text, Some(time_bucket))?;
+        Ok(assets)
+    }
+
+    /// Ensures thumbnail (`size=thumbnail`) or preview (`size=preview`) is downloaded
+    /// into HarmonyOS sandbox cache directory and returns the absolute local path.
+    pub async fn download_image_cache(
+        &self,
+        asset_id: &str,
+        size: ThumbnailSize,
+        cache_dir: &Path,
+    ) -> Result<PathBuf, ClientError> {
+        let sub_folder = match size {
+            ThumbnailSize::Thumbnail => "thumbs",
+            ThumbnailSize::Preview => "previews",
+        };
+
+        let target_dir = cache_dir.join(sub_folder);
+        tokio::fs::create_dir_all(&target_dir).await?;
+
+        let dest_file = target_dir.join(format!("{}.jpg", asset_id));
+
+        // Skip downloading if already cached and non-empty
+        if dest_file.exists() {
+            if let Ok(metadata) = std::fs::metadata(&dest_file) {
+                if metadata.len() > 0 {
+                    return Ok(dest_file);
+                }
+            }
+        }
+
+        // Immich standard endpoints: /api/assets/{id}/thumbnail?size={size}
+        let url = self.url(&format!(
+            "api/assets/{}/thumbnail?size={}",
+            asset_id,
+            size.as_query_str()
+        ))?;
+
+        let res = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        let final_res = if res.status() == StatusCode::NOT_FOUND {
+            // Older Immich fallback: /api/asset/thumbnail/{id}?size={size}
+            let legacy_url = self.url(&format!(
+                "api/asset/thumbnail/{}/?size={}",
+                asset_id,
+                size.as_query_str()
+            ))?;
+            self.client
+                .get(&legacy_url)
+                .headers(self.auth_headers())
+                .send()
+                .await?
+        } else {
+            res
+        };
+
+        if !final_res.status().is_success() {
+            let status = final_res.status();
+            let text = final_res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let bytes = final_res.bytes().await?;
+
+        // Write atomically
+        let temp_file = target_dir.join(format!("{}.tmp.{}", asset_id, std::process::id()));
+        tokio::fs::write(&temp_file, &bytes).await?;
+        tokio::fs::rename(&temp_file, &dest_file).await?;
+
+        Ok(dest_file)
+    }
+
+    /// Downloads motion photo / live photo video into cacheDir and returns local path.
+    pub async fn download_video_cache(
+        &self,
+        video_asset_id: &str,
+        cache_dir: &Path,
+    ) -> Result<PathBuf, ClientError> {
+        let target_dir = cache_dir.join("videos");
+        tokio::fs::create_dir_all(&target_dir).await?;
+
+        let dest_file = target_dir.join(format!("{}.mp4", video_asset_id));
+
+        if dest_file.exists() {
+            if let Ok(metadata) = std::fs::metadata(&dest_file) {
+                if metadata.len() > 0 {
+                    return Ok(dest_file);
+                }
+            }
+        }
+
+        // Endpoint: /api/assets/{id}/video/playback or /api/assets/{id}/original
+        let url = self.url(&format!("api/assets/{}/video/playback", video_asset_id))?;
+        let res = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        let final_res = if !res.status().is_success() {
+            // Fallback to /api/assets/{id}/original
+            let orig_url = self.url(&format!("api/assets/{}/original", video_asset_id))?;
+            self.client
+                .get(&orig_url)
+                .headers(self.auth_headers())
+                .send()
+                .await?
+        } else {
+            res
+        };
+
+        if !final_res.status().is_success() {
+            let status = final_res.status();
+            let text = final_res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let bytes = final_res.bytes().await?;
+        let temp_file = target_dir.join(format!("{}.tmp.{}", video_asset_id, std::process::id()));
+        tokio::fs::write(&temp_file, &bytes).await?;
+        tokio::fs::rename(&temp_file, &dest_file).await?;
+
+        Ok(dest_file)
+    }
+}
+
+fn url_encode(input: &str) -> String {
+    let mut encoded = String::with_capacity(input.len() * 3);
+    for b in input.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_url_construction() {
+        let client = ImmichClient::new(
+            Some("https://immich.home.arpa/".to_string()),
+            Some("my-api-key".to_string()),
+        );
+
+        let url = client.url("api/timeline/buckets").unwrap();
+        assert_eq!(url, "https://immich.home.arpa/api/timeline/buckets");
+
+        let headers = client.auth_headers();
+        assert_eq!(headers.get("x-api-key").unwrap(), "my-api-key");
+    }
+
+    #[test]
+    fn test_url_encode() {
+        assert_eq!(
+            url_encode("2024-03-01T00:00:00.000Z"),
+            "2024-03-01T00%3A00%3A00.000Z"
+        );
+    }
+}

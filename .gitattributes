@@ -1,0 +1,16 @@
+# Enforces LF line endings across Linux NAS & Windows PC
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.so binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp4 binary
+*.mov binary
+*.ico binary
+*.dylib binary
+*.dll binary

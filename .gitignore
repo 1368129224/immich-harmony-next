@@ -1,0 +1,26 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+Cargo.lock
+
+# OpenHarmony / DevEco Studio
+.hvigor/
+.idea/
+build/
+node_modules/
+oh_modules/
+*.hap
+*.har
+.cxx/
+local.properties
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Ignore generic compiled binary artifacts, BUT whitelist harmony-app libs .so
+*.so
+*.dll
+*.dylib
+!harmony-app/entry/libs/**/*.so
+!harmony-app/entry/libs/**/.gitkeep
