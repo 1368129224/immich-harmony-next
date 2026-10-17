@@ -428,4 +428,112 @@ mod tests {
             "2024-03-01T00%3A00%3A00.000Z"
         );
     }
+
+    #[tokio::test]
+    async fn test_client_mock_server_flow() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Mock 1: ping
+        Mock::given(method("GET"))
+            .and(path("/api/server-info/ping"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"res": "pong"})))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 2: modern buckets query fails with 400 (triggering legacy fallback)
+        Mock::given(method("GET"))
+            .and(path("/api/timeline/buckets"))
+            .and(query_param("visibility", "timeline"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 3: legacy buckets query succeeds
+        let buckets_json = serde_json::json!([
+            {"timeBucket": "2024-03-01T00:00:00.000Z", "count": 2}
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/api/timeline/buckets"))
+            .and(query_param("size", "MONTH"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(buckets_json))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 4: fetch bucket assets (columnar)
+        let assets_json = serde_json::json!({
+            "id": ["mock-asset-1"],
+            "type": ["IMAGE"],
+            "fileCreatedAt": ["2024-03-01T12:00:00.000Z"],
+            "fileModifiedAt": [null],
+            "updatedAt": [null],
+            "isFavorite": [true],
+            "duration": [null],
+            "livePhotoVideoId": [null],
+            "thumbhash": ["mockhash"]
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/timeline/bucket"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(assets_json))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 5: thumbnail download
+        Mock::given(method("GET"))
+            .and(path("/api/assets/mock-asset-1/thumbnail"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"MOCK_THUMB_BYTES"))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 6: asset EXIF info
+        let asset_info_json = serde_json::json!({
+            "id": "mock-asset-1",
+            "exifInfo": {
+                "make": "Apple",
+                "model": "iPhone 15 Pro",
+                "fNumber": 1.78,
+                "focalLength": 24.0,
+                "iso": 80
+            }
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/assets/mock-asset-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(asset_info_json))
+            .mount(&mock_server)
+            .await;
+
+        let client = ImmichClient::new(Some(mock_server.uri()), Some("test-api-key".to_string()));
+
+        // 1. Verify ping
+        let ping_res = client.ping().await.expect("Ping should succeed");
+        assert!(ping_res);
+
+        // 2. Verify bucket fallback logic
+        let buckets = client.fetch_buckets().await.expect("Should fetch buckets via fallback");
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].time_bucket, "2024-03-01T00:00:00.000Z");
+
+        // 3. Verify bucket assets parsing
+        let assets = client.fetch_bucket_assets("2024-03-01T00:00:00.000Z").await.expect("Should fetch assets");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].id, "mock-asset-1");
+        assert!(assets[0].is_favorite);
+
+        // 4. Verify thumbnail cache download
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cached_thumb = client.download_image_cache("mock-asset-1", ThumbnailSize::Thumbnail, temp_dir.path())
+            .await
+            .expect("Should download thumbnail");
+        assert!(cached_thumb.exists());
+        let content = std::fs::read(&cached_thumb).unwrap();
+        assert_eq!(content, b"MOCK_THUMB_BYTES");
+
+        // 5. Verify EXIF fetch
+        let exif = client.fetch_asset_exif("mock-asset-1").await.expect("Should fetch exif").expect("EXIF exists");
+        assert_eq!(exif.make, Some("Apple".to_string()));
+        assert_eq!(exif.model, Some("iPhone 15 Pro".to_string()));
+        assert_eq!(exif.iso, Some(80));
+    }
 }
