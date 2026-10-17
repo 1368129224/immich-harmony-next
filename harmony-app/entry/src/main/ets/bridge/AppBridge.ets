@@ -8,6 +8,7 @@ interface NativeImmichNapi {
   fetchBucketAssetsJson(timeBucket: string): Promise<string>;
   ensureAssetCached(assetId: string, mediaType: string): Promise<string>;
   prepareAssetViewerBundle(assetId: string): Promise<AssetViewerBundle>;
+  getAssetExif(assetId: string): Promise<ExifInfo | null>;
 }
 
 export class AppBridge {
@@ -136,5 +137,25 @@ export class AppBridge {
       };
     }
     return AppBridge.getNative().prepareAssetViewerBundle(assetId);
+  }
+
+  public static async getAssetExif(assetId: string): Promise<ExifInfo | null> {
+    if (AppBridge.USE_MOCK_BRIDGE) {
+      return {
+        cameraMake: 'Huawei',
+        cameraModel: 'Pura 70 Ultra',
+        lensModel: '24mm f/1.6-f/4.0',
+        focalLength: '24mm',
+        fNumber: 'f/1.6',
+        exposureTime: '1/120s',
+        iso: '100',
+        dateTimeOriginal: '2024-03-15 14:22:10',
+        fileSize: '4.2 MB',
+        resolution: '4032 × 3024',
+        city: 'Shenzhen',
+        country: 'China',
+      };
+    }
+    return AppBridge.getNative().getAssetExif(assetId);
   }
 }

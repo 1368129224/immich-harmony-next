@@ -19,6 +19,8 @@ pub enum ClientError {
     ServerStatus(StatusCode, String),
     #[error("Adapter parsing error: {0}")]
     Adapter(#[from] AdapterError),
+    #[error("JSON parsing error: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("No base URL configured")]
@@ -353,6 +355,36 @@ impl ImmichClient {
         tokio::fs::rename(&temp_file, &dest_file).await?;
 
         Ok(dest_file)
+    }
+
+    /// Fetches full asset information including EXIF metadata from /api/assets/{id}.
+    pub async fn fetch_asset_info(&self, asset_id: &str) -> Result<serde_json::Value, ClientError> {
+        let url = self.url(&format!("api/assets/{}", asset_id))?;
+        let res = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers())
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let val: serde_json::Value = res.json().await?;
+        Ok(val)
+    }
+
+    /// Fetches EXIF info specifically for an asset.
+    pub async fn fetch_asset_exif(&self, asset_id: &str) -> Result<Option<crate::adapter::ExifResponseDto>, ClientError> {
+        let info = self.fetch_asset_info(asset_id).await?;
+        if let Some(exif_val) = info.get("exifInfo") {
+            let exif_dto: crate::adapter::ExifResponseDto = serde_json::from_value(exif_val.clone())?;
+            return Ok(Some(exif_dto));
+        }
+        Ok(None)
     }
 }
 

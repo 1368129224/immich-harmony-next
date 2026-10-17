@@ -217,6 +217,28 @@ impl ImmichCore {
             duration: asset.duration,
         })
     }
+
+    /// Fetches asset EXIF details either from local DB cache or remote server.
+    pub async fn get_or_fetch_exif(
+        &self,
+        asset_id: &str,
+    ) -> Result<Option<crate::adapter::ExifResponseDto>, CoreError> {
+        // 1. Check local DB
+        if let Some(asset) = self.db.get_asset(asset_id)? {
+            if let Some(exif) = asset.exif {
+                return Ok(Some(exif));
+            }
+        }
+
+        // 2. Fetch from network
+        let client = self.client.read().await;
+        if let Ok(Some(exif)) = client.fetch_asset_exif(asset_id).await {
+            let _ = self.db.update_asset_exif(asset_id, &exif);
+            return Ok(Some(exif));
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +275,7 @@ mod tests {
             local_preview_path: None,
             local_video_path: None,
             bucket_id: Some("2024-03-01T00:00:00.000Z".to_string()),
+            exif: None,
         };
 
         core.db.upsert_assets(&[sample_asset]).unwrap();
@@ -279,5 +302,22 @@ mod tests {
         assert!(bundle.is_live_photo);
         assert_eq!(bundle.image_path, mock_preview_file.to_str().unwrap());
         assert_eq!(bundle.video_path, Some(mock_video_file.to_str().unwrap().to_string()));
+
+        // Test EXIF retrieval
+        let exif = core.get_or_fetch_exif(asset_id).await.unwrap();
+        assert!(exif.is_none()); // Initially none
+
+        let mock_exif = crate::adapter::ExifResponseDto {
+            make: Some("Huawei".to_string()),
+            model: Some("Pura 70 Ultra".to_string()),
+            iso: Some(100),
+            ..Default::default()
+        };
+        core.db.update_asset_exif(asset_id, &mock_exif).unwrap();
+
+        let fetched_exif = core.get_or_fetch_exif(asset_id).await.unwrap().unwrap();
+        assert_eq!(fetched_exif.make, Some("Huawei".to_string()));
+        assert_eq!(fetched_exif.model, Some("Pura 70 Ultra".to_string()));
+        assert_eq!(fetched_exif.iso, Some(100));
     }
 }

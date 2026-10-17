@@ -68,6 +68,7 @@ impl DbEngine {
                 local_preview_path TEXT,
                 local_video_path TEXT,
                 bucket_id TEXT,
+                exif_json TEXT,
                 updated_timestamp INTEGER NOT NULL
             );
 
@@ -155,8 +156,8 @@ impl DbEngine {
                     id, asset_type, file_created_at, file_modified_at, updated_at,
                     is_favorite, duration, live_photo_video_id, thumbhash,
                     local_thumb_path, local_preview_path, local_video_path, bucket_id,
-                    updated_timestamp
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                    exif_json, updated_timestamp
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                 ON CONFLICT(id) DO UPDATE SET
                     asset_type = excluded.asset_type,
                     file_created_at = excluded.file_created_at,
@@ -170,10 +171,12 @@ impl DbEngine {
                     local_preview_path = COALESCE(excluded.local_preview_path, assets.local_preview_path),
                     local_video_path = COALESCE(excluded.local_video_path, assets.local_video_path),
                     bucket_id = COALESCE(excluded.bucket_id, assets.bucket_id),
+                    exif_json = COALESCE(excluded.exif_json, assets.exif_json),
                     updated_timestamp = excluded.updated_timestamp",
             )?;
 
             for a in assets {
+                let exif_str = a.exif.as_ref().and_then(|e| serde_json::to_string(e).ok());
                 stmt.execute(params![
                     a.id,
                     a.asset_type,
@@ -188,6 +191,7 @@ impl DbEngine {
                     a.local_preview_path,
                     a.local_video_path,
                     a.bucket_id,
+                    exif_str,
                     now,
                 ])?;
             }
@@ -202,7 +206,7 @@ impl DbEngine {
         let mut stmt = conn.prepare(
             "SELECT id, asset_type, file_created_at, file_modified_at, updated_at,
                     is_favorite, duration, live_photo_video_id, thumbhash,
-                    local_thumb_path, local_preview_path, local_video_path, bucket_id
+                    local_thumb_path, local_preview_path, local_video_path, bucket_id, exif_json
              FROM assets
              WHERE bucket_id = ?1
              ORDER BY file_created_at DESC",
@@ -210,6 +214,8 @@ impl DbEngine {
 
         let rows = stmt.query_map(params![bucket_id], |row| {
             let is_fav_int: i32 = row.get(5)?;
+            let exif_str: Option<String> = row.get(13)?;
+            let exif = exif_str.and_then(|s| serde_json::from_str(&s).ok());
             Ok(Asset {
                 id: row.get(0)?,
                 asset_type: row.get(1)?,
@@ -224,6 +230,7 @@ impl DbEngine {
                 local_preview_path: row.get(10)?,
                 local_video_path: row.get(11)?,
                 bucket_id: row.get(12)?,
+                exif,
             })
         })?;
 
@@ -239,7 +246,7 @@ impl DbEngine {
         let mut stmt = conn.prepare(
             "SELECT id, asset_type, file_created_at, file_modified_at, updated_at,
                     is_favorite, duration, live_photo_video_id, thumbhash,
-                    local_thumb_path, local_preview_path, local_video_path, bucket_id
+                    local_thumb_path, local_preview_path, local_video_path, bucket_id, exif_json
              FROM assets
              WHERE id = ?1",
         )?;
@@ -247,6 +254,8 @@ impl DbEngine {
         let asset = stmt
             .query_row(params![id], |row| {
                 let is_fav_int: i32 = row.get(5)?;
+                let exif_str: Option<String> = row.get(13)?;
+                let exif = exif_str.and_then(|s| serde_json::from_str(&s).ok());
                 Ok(Asset {
                     id: row.get(0)?,
                     asset_type: row.get(1)?,
@@ -261,11 +270,22 @@ impl DbEngine {
                     local_preview_path: row.get(10)?,
                     local_video_path: row.get(11)?,
                     bucket_id: row.get(12)?,
+                    exif,
                 })
             })
             .optional()?;
 
         Ok(asset)
+    }
+
+    pub fn update_asset_exif(&self, id: &str, exif: &crate::adapter::ExifResponseDto) -> Result<(), DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let exif_str = serde_json::to_string(exif).map_err(|e| DbError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
+        conn.execute(
+            "UPDATE assets SET exif_json = ?2 WHERE id = ?1",
+            params![id, exif_str],
+        )?;
+        Ok(())
     }
 
     pub fn update_asset_paths(
@@ -359,6 +379,7 @@ mod tests {
                 local_preview_path: None,
                 local_video_path: None,
                 bucket_id: Some("2024-03-01T00:00:00.000Z".to_string()),
+                exif: None,
             },
             Asset {
                 id: "asset-2".to_string(),
@@ -374,6 +395,7 @@ mod tests {
                 local_preview_path: None,
                 local_video_path: None,
                 bucket_id: Some("2024-03-01T00:00:00.000Z".to_string()),
+                exif: None,
             },
         ];
 

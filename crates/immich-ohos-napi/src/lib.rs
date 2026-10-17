@@ -81,6 +81,22 @@ pub async fn ensure_asset_cached(asset_id: String, media_type: String) -> Result
         .map_err(|e| Error::new(Status::GenericFailure, format!("Cache media error: {}", e)))
 }
 
+#[napi(object)]
+pub struct ExifInfoDto {
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens_model: Option<String>,
+    pub focal_length: Option<String>,
+    pub f_number: Option<String>,
+    pub exposure_time: Option<String>,
+    pub iso: Option<String>,
+    pub date_time_original: Option<String>,
+    pub file_size: Option<String>,
+    pub resolution: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+}
+
 #[napi]
 pub async fn prepare_asset_viewer_bundle(asset_id: String) -> Result<AssetViewerBundleDto> {
     let core = get_core()?;
@@ -97,4 +113,34 @@ pub async fn prepare_asset_viewer_bundle(asset_id: String) -> Result<AssetViewer
         is_live_photo: bundle.is_live_photo,
         duration: bundle.duration,
     })
+}
+
+#[napi]
+pub async fn get_asset_exif(asset_id: String) -> Result<Option<ExifInfoDto>> {
+    let core = get_core()?;
+    let exif_opt = core
+        .get_or_fetch_exif(&asset_id)
+        .await
+        .map_err(|e| Error::new(Status::GenericFailure, format!("Fetch exif error: {}", e)))?;
+
+    Ok(exif_opt.map(|e| ExifInfoDto {
+        camera_make: e.make,
+        camera_model: e.model,
+        lens_model: e.lens_model,
+        focal_length: e.focal_length.map(|f| format!("{:.0}mm", f)),
+        f_number: e.f_number.map(|f| format!("f/{:.1}", f)),
+        exposure_time: e.exposure_time,
+        iso: e.iso.map(|i| i.to_string()),
+        date_time_original: e.date_time_original,
+        file_size: e.file_size_in_byte.map(|b| {
+            if b > 1024 * 1024 {
+                format!("{:.1} MB", (b as f64) / (1024.0 * 1024.0))
+            } else {
+                format!("{} KB", b / 1024)
+            }
+        }),
+        resolution: None,
+        city: e.city,
+        country: e.country,
+    }))
 }

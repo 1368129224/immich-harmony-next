@@ -42,18 +42,15 @@ export struct AssetViewerPage {
       const bundle = await AppBridge.prepareAssetViewerBundle(assetId);
       this.viewerBundle = bundle;
 
-      // Mock or extract EXIF info
-      this.exifData = {
-        cameraMake: 'Sony',
-        cameraModel: 'ILCE-7RM5',
-        lensModel: 'FE 24-70mm F2.8 GM II',
-        focalLength: '35mm',
-        fNumber: 'f/2.8',
-        exposureTime: '1/250s',
-        iso: '100',
-        dateTimeOriginal: this.activeAsset.fileCreatedAt,
-        resolution: '9504 × 6336',
-      };
+      // Extract EXIF info via AppBridge
+      const exif = await AppBridge.getAssetExif(assetId);
+      if (exif) {
+        this.exifData = exif;
+      } else {
+        this.exifData = {
+          dateTimeOriginal: this.activeAsset.fileCreatedAt,
+        };
+      }
     } catch (err) {
       console.error('[AssetViewerPage] Failed to load bundle:', err);
     } finally {

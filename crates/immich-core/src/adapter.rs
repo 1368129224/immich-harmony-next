@@ -39,6 +39,27 @@ pub struct Asset {
     pub local_preview_path: Option<String>,
     pub local_video_path: Option<String>,
     pub bucket_id: Option<String>,
+    pub exif: Option<ExifResponseDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExifResponseDto {
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub lens_model: Option<String>,
+    pub f_number: Option<f64>,
+    pub focal_length: Option<f64>,
+    pub iso: Option<i64>,
+    pub exposure_time: Option<String>,
+    pub date_time_original: Option<String>,
+    pub file_size_in_byte: Option<i64>,
+    pub city: Option<String>,
+    pub state: Option<String>,
+    pub country: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub projection_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +91,7 @@ pub struct LegacyAssetDto {
     pub duration: Option<String>,
     pub live_photo_video_id: Option<String>,
     pub thumbhash: Option<String>,
+    pub exif_info: Option<ExifResponseDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +180,7 @@ pub fn parse_bucket_response(
                     local_preview_path: None,
                     local_video_path: None,
                     bucket_id: bucket_id.map(ToString::to_string),
+                    exif: None,
                 });
             }
 
@@ -180,6 +203,7 @@ pub fn parse_bucket_response(
                     local_preview_path: None,
                     local_video_path: None,
                     bucket_id: bucket_id.map(ToString::to_string),
+                    exif: item.exif_info,
                 })
                 .collect();
             Ok(assets)
@@ -263,6 +287,43 @@ mod tests {
         assert!(item.is_favorite);
         assert_eq!(item.thumbhash, Some("legacyhash".to_string()));
         assert_eq!(item.bucket_id, Some("2023-11-01T00:00:00.000Z".to_string()));
+    }
+
+    #[test]
+    fn test_parse_legacy_array_with_exif() {
+        let json_data = r#"[
+            {
+                "id": "uuid-legacy-exif",
+                "type": "IMAGE",
+                "fileCreatedAt": "2023-11-15T08:30:00.000Z",
+                "fileModifiedAt": null,
+                "updatedAt": null,
+                "isFavorite": false,
+                "duration": null,
+                "livePhotoVideoId": null,
+                "thumbhash": null,
+                "exifInfo": {
+                    "make": "Sony",
+                    "model": "ILCE-7M4",
+                    "fNumber": 2.8,
+                    "focalLength": 35.0,
+                    "iso": 200,
+                    "exposureTime": "1/250"
+                }
+            }
+        ]"#;
+
+        let assets = parse_bucket_response(json_data, Some("2023-11-01T00:00:00.000Z"))
+            .expect("Legacy array parse with exif should succeed");
+
+        assert_eq!(assets.len(), 1);
+        let exif = assets[0].exif.as_ref().expect("exif should be present");
+        assert_eq!(exif.make, Some("Sony".to_string()));
+        assert_eq!(exif.model, Some("ILCE-7M4".to_string()));
+        assert_eq!(exif.f_number, Some(2.8));
+        assert_eq!(exif.focal_length, Some(35.0));
+        assert_eq!(exif.iso, Some(200));
+        assert_eq!(exif.exposure_time, Some("1/250".to_string()));
     }
 
     #[test]
