@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Immich Client Entry Module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Immich Native Photo Browser"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Immich NEXT"
+    }
+  ]
+}
