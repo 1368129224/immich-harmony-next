@@ -1,4 +1,11 @@
-import { AssetItem, AssetViewerBundle, TimeBucketItem } from '../models/AssetModels';
+import {
+  AssetItem,
+  AssetRawItem,
+  AssetViewerBundle,
+  BucketRawItem,
+  ExifInfo,
+  TimeBucketItem
+} from '../models/AssetModels';
 
 // Interface matching the Rust N-API exports in immich-ohos-napi
 interface NativeImmichNapi {
@@ -10,6 +17,9 @@ interface NativeImmichNapi {
   prepareAssetViewerBundle(assetId: string): Promise<AssetViewerBundle>;
   getAssetExif(assetId: string): Promise<ExifInfo | null>;
 }
+
+// Global declaration for HarmonyOS N-API loader
+declare function requireNapi(moduleName: string): NativeImmichNapi;
 
 export class AppBridge {
   /**
@@ -24,15 +34,13 @@ export class AppBridge {
   private static getNative(): NativeImmichNapi {
     if (!AppBridge.nativeModule) {
       try {
-        // In HarmonyOS NEXT, N-API .so is loaded via standard import/require
-        // @ts-ignore
-        AppBridge.nativeModule = requireNapi('libimmich_ohos_napi.so') as NativeImmichNapi;
+        AppBridge.nativeModule = requireNapi('libimmich_ohos_napi.so');
       } catch (err) {
-        console.error('[AppBridge] Failed to load libimmich_ohos_napi.so, falling back to mock:', err);
+        console.error('[AppBridge] Failed to load libimmich_ohos_napi.so, falling back to mock:', JSON.stringify(err));
         AppBridge.USE_MOCK_BRIDGE = true;
       }
     }
-    return AppBridge.nativeModule!;
+    return AppBridge.nativeModule as NativeImmichNapi;
   }
 
   public static async initCoreEngine(dbDir: string, cacheDir: string): Promise<boolean> {
@@ -61,8 +69,8 @@ export class AppBridge {
     }
 
     const rawJson = await AppBridge.getNative().syncAndGetBuckets();
-    const parsed = JSON.parse(rawJson) as Array<{ timeBucket: string; count: number }>;
-    return parsed.map(b => new TimeBucketItem(b.timeBucket, b.count));
+    const parsed: BucketRawItem[] = JSON.parse(rawJson);
+    return parsed.map((b: BucketRawItem): TimeBucketItem => new TimeBucketItem(b.timeBucket, b.count));
   }
 
   public static async fetchBucketAssets(timeBucket: string): Promise<AssetItem[]> {
@@ -99,19 +107,19 @@ export class AppBridge {
     }
 
     const rawJson = await AppBridge.getNative().fetchBucketAssetsJson(timeBucket);
-    const parsed = JSON.parse(rawJson) as Array<Record<string, unknown>>;
-    return parsed.map(item => new AssetItem({
-      id: item.id as string,
-      assetType: (item.type || item.assetType) as string,
-      fileCreatedAt: item.fileCreatedAt as string,
-      fileModifiedAt: item.fileModifiedAt as string | undefined,
-      isFavorite: !!item.isFavorite,
-      duration: item.duration as string | undefined,
-      livePhotoVideoId: item.livePhotoVideoId as string | undefined,
-      thumbhash: item.thumbhash as string | undefined,
-      localThumbPath: item.localThumbPath as string | undefined,
-      localPreviewPath: item.localPreviewPath as string | undefined,
-      localVideoPath: item.localVideoPath as string | undefined,
+    const parsed: AssetRawItem[] = JSON.parse(rawJson);
+    return parsed.map((item: AssetRawItem): AssetItem => new AssetItem({
+      id: item.id,
+      assetType: item.type ?? item.assetType ?? 'IMAGE',
+      fileCreatedAt: item.fileCreatedAt,
+      fileModifiedAt: item.fileModifiedAt,
+      isFavorite: item.isFavorite ?? false,
+      duration: item.duration,
+      livePhotoVideoId: item.livePhotoVideoId,
+      thumbhash: item.thumbhash,
+      localThumbPath: item.localThumbPath,
+      localPreviewPath: item.localPreviewPath,
+      localVideoPath: item.localVideoPath,
       bucketId: timeBucket,
     }));
   }
@@ -127,7 +135,7 @@ export class AppBridge {
     if (AppBridge.USE_MOCK_BRIDGE) {
       const isLive = assetId.includes('live');
       const isVid = assetId.includes('video');
-      return {
+      const bundle: AssetViewerBundle = {
         assetId: assetId,
         assetType: isVid ? 'VIDEO' : 'IMAGE',
         imagePath: `/data/storage/el2/base/cache/previews/${assetId}.jpg`,
@@ -135,13 +143,14 @@ export class AppBridge {
         isLivePhoto: isLive,
         duration: isVid ? '0:00:32.000000' : undefined,
       };
+      return bundle;
     }
     return AppBridge.getNative().prepareAssetViewerBundle(assetId);
   }
 
   public static async getAssetExif(assetId: string): Promise<ExifInfo | null> {
     if (AppBridge.USE_MOCK_BRIDGE) {
-      return {
+      const mockExif: ExifInfo = {
         cameraMake: 'Huawei',
         cameraModel: 'Pura 70 Ultra',
         lensModel: '24mm f/1.6-f/4.0',
@@ -155,6 +164,7 @@ export class AppBridge {
         city: 'Shenzhen',
         country: 'China',
       };
+      return mockExif;
     }
     return AppBridge.getNative().getAssetExif(assetId);
   }

@@ -47,9 +47,10 @@ export struct AssetViewerPage {
       if (exif) {
         this.exifData = exif;
       } else {
-        this.exifData = {
+        const fallbackExif: ExifInfo = {
           dateTimeOriginal: this.activeAsset.fileCreatedAt,
         };
+        this.exifData = fallbackExif;
       }
     } catch (err) {
       console.error('[AssetViewerPage] Failed to load bundle:', err);

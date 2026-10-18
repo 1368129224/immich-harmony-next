@@ -85,7 +85,7 @@ export struct TimelinePage {
                 Row() {
                   Text(this.formatBucketTitle(bucket.timeBucket))
                     .fontSize(16)
-                    .fontWeight(FontWeight.SemiBold)
+                    .fontWeight(FontWeight.Bold)
                     .fontColor('#E4E7ED')
                   Blank()
                   Text(`${bucket.count} items`)

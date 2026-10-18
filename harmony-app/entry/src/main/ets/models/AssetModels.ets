@@ -1,5 +1,20 @@
 // ArkUI V2 Models for Immich Assets and Timeline Buckets
 
+export interface AssetItemOptions {
+  id: string;
+  assetType?: string;
+  fileCreatedAt: string;
+  fileModifiedAt?: string;
+  isFavorite?: boolean;
+  duration?: string;
+  livePhotoVideoId?: string;
+  thumbhash?: string;
+  localThumbPath?: string;
+  localPreviewPath?: string;
+  localVideoPath?: string;
+  bucketId?: string;
+}
+
 @ObservedV2
 export class AssetItem {
   @Trace id: string = '';
@@ -15,9 +30,22 @@ export class AssetItem {
   @Trace localVideoPath?: string;
   @Trace bucketId?: string;
 
-  constructor(partial?: Partial<AssetItem>) {
-    if (partial) {
-      Object.assign(this, partial);
+  constructor(options?: AssetItemOptions) {
+    if (options) {
+      this.id = options.id;
+      if (options.assetType) {
+        this.assetType = options.assetType;
+      }
+      this.fileCreatedAt = options.fileCreatedAt;
+      this.fileModifiedAt = options.fileModifiedAt;
+      this.isFavorite = options.isFavorite ?? false;
+      this.duration = options.duration;
+      this.livePhotoVideoId = options.livePhotoVideoId;
+      this.thumbhash = options.thumbhash;
+      this.localThumbPath = options.localThumbPath;
+      this.localPreviewPath = options.localPreviewPath;
+      this.localVideoPath = options.localVideoPath;
+      this.bucketId = options.bucketId;
     }
   }
 
@@ -66,4 +94,24 @@ export interface ExifInfo {
   resolution?: string;
   city?: string;
   country?: string;
+}
+
+export interface BucketRawItem {
+  timeBucket: string;
+  count: number;
+}
+
+export interface AssetRawItem {
+  id: string;
+  type?: string;
+  assetType?: string;
+  fileCreatedAt: string;
+  fileModifiedAt?: string;
+  isFavorite?: boolean;
+  duration?: string;
+  livePhotoVideoId?: string;
+  thumbhash?: string;
+  localThumbPath?: string;
+  localPreviewPath?: string;
+  localVideoPath?: string;
 }

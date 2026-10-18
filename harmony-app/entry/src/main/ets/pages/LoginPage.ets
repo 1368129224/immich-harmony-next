@@ -23,8 +23,8 @@ export struct LoginPage {
       const result = await AppBridge.loginServer(this.serverUrl.trim(), this.apiKey.trim());
       console.info('[LoginPage] Login result:', result);
       this.onLoginSuccess();
-    } catch (err: unknown) {
-      this.errorMessage = 'Login failed: ' + String(err);
+    } catch (err) {
+      this.errorMessage = 'Login failed: ' + JSON.stringify(err);
     } finally {
       this.isLoading = false;
     }
