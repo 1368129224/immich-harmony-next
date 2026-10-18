@@ -1,9 +1,11 @@
 {
+  "modelVersion": "5.0.0",
   "name": "immich-harmony-app",
   "version": "1.0.0",
   "description": "Immich Native HarmonyOS NEXT Client",
   "main": "",
   "author": "",
   "license": "Apache-2.0",
-  "dependencies": {}
+  "dependencies": {},
+  "devDependencies": {}
 }
