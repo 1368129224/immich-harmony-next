@@ -13,15 +13,22 @@ export struct FilmstripScrubber {
       Row({ space: 8 }) {
         ForEach(this.assets, (item: AssetItem) => {
           Stack({ alignContent: Alignment.BottomEnd }) {
-            Image(item.localThumbPath || item.localPreviewPath || $r('app.media.app_icon'))
+            Column()
               .width(54)
               .height(54)
-              .objectFit(ImageFit.Cover)
+              .backgroundColor('#25272B')
               .borderRadius(6)
-              .border({
-                width: this.currentAssetId === item.id ? 2 : 0,
-                color: '#409EFF',
-              })
+            if (item.localThumbPath || item.localPreviewPath) {
+              Image(item.localThumbPath || item.localPreviewPath)
+                .width(54)
+                .height(54)
+                .objectFit(ImageFit.Cover)
+                .borderRadius(6)
+                .border({
+                  width: this.currentAssetId === item.id ? 2 : 0,
+                  color: '#409EFF',
+                })
+            }
 
             if (item.isLivePhoto) {
               Text('LIVE')
