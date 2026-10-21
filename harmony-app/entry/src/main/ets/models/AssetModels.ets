@@ -152,7 +152,7 @@ export class BackupConfig {
   @Trace enabled: boolean = false;
   @Trace wifiOnly: boolean = true;
   @Trace requireCharging: boolean = false;
-  @Trace selectedAlbumNames: string[] = ['Camera', 'Screenshots'];
+  @Trace selectedAlbumNames: string[] = [];
 
   constructor(enabled: boolean = false, wifiOnly: boolean = true, requireCharging: boolean = false) {
     this.enabled = enabled;

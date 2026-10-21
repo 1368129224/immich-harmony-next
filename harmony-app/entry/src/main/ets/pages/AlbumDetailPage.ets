@@ -70,7 +70,7 @@ export struct AlbumDetailPage {
         }, 80);
       }
     } catch (err) {
-      this.loadError = err instanceof Error ? err.message : 'Unable to load album photos';
+      this.loadError = err instanceof Error ? err.message : '无法加载相册照片';
       console.error('[AlbumDetailPage] Failed to load album page');
     } finally {
       this.isLoading = false;
@@ -132,15 +132,15 @@ export struct AlbumDetailPage {
     if (this.isLoading) {
       Column({ space: 8 }) {
         LoadingProgress().width(32).height(32).color('#409EFF')
-        Text('Loading photos...').fontSize(12).fontColor('#909399')
+        Text('正在加载照片...').fontSize(12).fontColor('#909399')
       }
       .width('100%')
       .padding(20)
     } else if (this.loadError) {
       Column({ space: 8 }) {
-        Text('Unable to load album photos').fontSize(15).fontColor('#FFFFFF')
+        Text('无法加载相册照片').fontSize(15).fontColor('#FFFFFF')
         Text(this.loadError).fontSize(12).fontColor('#F56C6C')
-        Button('Retry')
+        Button('重试')
           .fontColor('#409EFF')
           .backgroundColor(Color.Transparent)
           .onClick(() => { this.loadNextPage(); })
@@ -148,7 +148,7 @@ export struct AlbumDetailPage {
       .width('100%')
       .padding(20)
     } else if (this.hasMore) {
-      Button('Load More')
+      Button('加载更多')
         .fontColor('#409EFF')
         .backgroundColor('#25272B')
         .margin({ top: 16, bottom: 16 })
@@ -157,7 +157,7 @@ export struct AlbumDetailPage {
       Column({ space: 12 }) {
         Image($r('app.media.icon_albums'))
           .width(48).height(48).fillColor('#909399')
-        Text('This album is empty').fontSize(15).fontColor('#A4A9B2')
+        Text('相册为空').fontSize(15).fontColor('#A4A9B2')
       }
       .width('100%')
       .padding({ top: 48, bottom: 48 })
@@ -168,7 +168,7 @@ export struct AlbumDetailPage {
     Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
         Row({ space: 12 }) {
-          Button('Back')
+          Button('返回')
             .fontSize(14)
             .fontColor('#409EFF')
             .backgroundColor(Color.Transparent)
@@ -181,14 +181,14 @@ export struct AlbumDetailPage {
               .fontColor('#FFFFFF')
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(`${this.album.count} items · ${this.assets.length} loaded · Newest at bottom`)
+            Text(`${this.album.count} 项 · 已加载 ${this.assets.length} 项 · 最新在底部`)
               .fontSize(11)
               .fontColor('#909399')
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
-          Text(`${this.columnCount} col`)
+          Text(`${this.columnCount} 列`)
             .fontSize(11)
             .fontColor('#909399')
             .margin({ right: 4 })
@@ -277,7 +277,7 @@ export struct AlbumDetailPage {
       if (!this.isAtBottom && this.assets.length > 0) {
         Button({ type: ButtonType.Capsule }) {
           Row({ space: 4 }) {
-            Text('↓ Latest')
+            Text('↓ 最新')
               .fontSize(12)
               .fontColor('#FFFFFF')
               .fontWeight(FontWeight.Medium)

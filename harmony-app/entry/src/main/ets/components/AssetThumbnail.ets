@@ -39,7 +39,7 @@ export struct AssetThumbnail {
       this.source = await ImmichApiService.getInstance().cacheAssetImage(this.asset.id);
       this.asset.localThumbPath = this.source;
     } catch (error) {
-      this.errorText = error instanceof Error ? error.message : 'Image unavailable';
+      this.errorText = error instanceof Error ? error.message : '图片不可用';
       this.failed = true;
     } finally {
       this.loading = false;
@@ -58,7 +58,7 @@ export struct AssetThumbnail {
       } else if (this.failed) {
         Column({ space: 4 }) {
           Text(this.errorText).fontSize(8).fontColor('#A4A9B2').maxLines(2)
-          Text('Retry').fontSize(10).fontColor('#409EFF')
+          Text('重试').fontSize(10).fontColor('#409EFF')
         }
         .onClick(() => { this.load(); })
       } else {

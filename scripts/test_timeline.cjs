@@ -166,10 +166,10 @@ test('existing sandbox directory does not break the second thumbnail', async () 
   assert.equal(h.files.size, 2);
 });
 test('HarmonyOS BusinessError retains diagnostic codes instead of object Object', () => {
-  assert.match(formatApiError({ code: 2300006, message: 'resolve failed' }), /2300006.*IPv6/);
-  assert.match(formatApiError({ code: 2300007 }), /Cannot connect/);
-  assert.match(formatApiError({ code: 2300028 }), /timed out/);
-  assert.match(formatApiError({ code: 2300060 }), /TLS certificate/);
+  assert.match(formatApiError({ code: 2300006, message: 'resolve failed' }), /无法解析服务器域名（2300006）/);
+  assert.match(formatApiError({ code: 2300007 }), /无法连接/);
+  assert.match(formatApiError({ code: 2300028 }), /超时/);
+  assert.match(formatApiError({ code: 2300060 }), /证书/);
   assert.equal(formatApiError(new Error('HTTP 401')), 'HTTP 401');
 });
 test('device DNS failure remains identifiable through password login', async () => {
@@ -246,5 +246,5 @@ test('invalid album responses and nonadvancing pagination fail visibly', async (
     assert.throws(() => parseAlbumAssetPage(bad));
   }
   const h = serviceHarness([json({ assets: { items: legacy, nextPage: 1 } })]);
-  await assert.rejects(h.service.fetchAlbumAssetsPage('album-one'), /did not advance/);
+  await assert.rejects(h.service.fetchAlbumAssetsPage('album-one'), /没有前进/);
 });

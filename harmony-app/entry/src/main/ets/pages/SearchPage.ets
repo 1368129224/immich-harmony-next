@@ -4,18 +4,18 @@
 @ComponentV2
 export struct SearchPage {
   @Local searchQuery: string = '';
-  @Local recentSearches: string[] = ['Family', 'Tokyo Trip', 'Cat', 'Night View'];
+  @Local recentSearches: string[] = [];
 
   private presetCategories: string[] = [
-    'People & Pets', 'Places', 'Live Photos', 'Videos',
-    'Favorites', 'Documents', 'Food', 'Screenshots'
+    '人物与宠物', '地点', '实况照片', '视频',
+    '收藏', '文档', '美食', '截图'
   ];
 
   build() {
     Column({ space: 16 }) {
       // Top Title
       Row() {
-        Text('Search')
+        Text('搜索')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
@@ -31,7 +31,7 @@ export struct SearchPage {
           .height(20)
           .fillColor('#909399')
 
-        TextInput({ text: this.searchQuery, placeholder: 'Search photos, places, people...' })
+        TextInput({ text: this.searchQuery, placeholder: '搜索照片、地点、人物...' })
           .type(InputType.Normal)
           .placeholderColor('#606266')
           .fontColor('#FFFFFF')
@@ -62,7 +62,7 @@ export struct SearchPage {
         Column({ space: 22 }) {
           // Discovery & Preset Categories
           Column({ space: 10 }) {
-            Text('Categories')
+            Text('分类')
               .fontSize(15)
               .fontWeight(FontWeight.Bold)
               .fontColor('#E4E7ED')
@@ -93,12 +93,12 @@ export struct SearchPage {
           if (this.recentSearches.length > 0) {
             Column({ space: 8 }) {
               Row() {
-                Text('Recent Searches')
+                Text('最近搜索')
                   .fontSize(15)
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#E4E7ED')
                 Blank()
-                Button('Clear')
+                Button('清空')
                   .fontSize(12)
                   .fontColor('#909399')
                   .backgroundColor(Color.Transparent)
@@ -139,11 +139,11 @@ export struct SearchPage {
 
           // Smart Semantic Search Tip
           Column({ space: 6 }) {
-            Text('Immich Smart Search')
+            Text('Immich 智能搜索')
               .fontSize(13)
               .fontWeight(FontWeight.Medium)
               .fontColor('#409EFF')
-            Text('Search by facial recognition, natural language clip search (e.g. "sunset over lake"), OCR text in photos, and GPS map locations.')
+            Text('支持人脸识别、自然语言语义搜索（如“湖边日落”）、照片文字识别（OCR）以及 GPS 地图位置搜索。')
               .fontSize(11)
               .fontColor('#909399')
               .lineHeight(16)

@@ -8,6 +8,15 @@ export struct ExifDrawer {
 
   @Event onClose: () => void = () => {};
 
+  formatParams(): string {
+    const parts: string[] = [];
+    if (this.exif.focalLength) { parts.push(this.exif.focalLength); }
+    if (this.exif.fNumber) { parts.push(this.exif.fNumber); }
+    if (this.exif.exposureTime) { parts.push(this.exif.exposureTime); }
+    if (this.exif.iso) { parts.push('ISO ' + this.exif.iso); }
+    return parts.length > 0 ? parts.join(' · ') : '暂无';
+  }
+
   build() {
     if (this.isVisible) {
       Column({ space: 14 }) {
@@ -29,12 +38,12 @@ export struct ExifDrawer {
 
         // Header
         Row() {
-          Text('Details & EXIF')
+          Text('详细信息（EXIF）')
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
           Blank()
-          Button('Close')
+          Button('关闭')
             .fontSize(12)
             .fontColor('#409EFF')
             .backgroundColor(Color.Transparent)
@@ -49,11 +58,11 @@ export struct ExifDrawer {
         // Camera & Lens Details
         Column({ space: 8 }) {
           Row() {
-            Text('Camera')
+            Text('相机')
               .fontSize(13)
               .fontColor('#909399')
             Blank()
-            Text((this.exif.cameraMake || '') + ' ' + (this.exif.cameraModel || 'Unknown Device'))
+            Text((this.exif.cameraMake || '') + ' ' + (this.exif.cameraModel || '未知设备'))
               .fontSize(13)
               .fontColor('#E4E7ED')
           }
@@ -61,7 +70,7 @@ export struct ExifDrawer {
 
           if (this.exif.lensModel) {
             Row() {
-              Text('Lens')
+              Text('镜头')
                 .fontSize(13)
                 .fontColor('#909399')
               Blank()
@@ -73,22 +82,22 @@ export struct ExifDrawer {
           }
 
           Row() {
-            Text('Parameters')
+            Text('拍摄参数')
               .fontSize(13)
               .fontColor('#909399')
             Blank()
-            Text(`${this.exif.focalLength || '24mm'} · ${this.exif.fNumber || 'f/1.8'} · ${this.exif.exposureTime || '1/120s'} · ISO ${this.exif.iso || '100'}`)
+            Text(this.formatParams())
               .fontSize(13)
               .fontColor('#E4E7ED')
           }
           .width('100%')
 
           Row() {
-            Text('Resolution')
+            Text('分辨率')
               .fontSize(13)
               .fontColor('#909399')
             Blank()
-            Text(this.exif.resolution || '4032 × 3024')
+            Text(this.exif.resolution || '暂无')
               .fontSize(13)
               .fontColor('#E4E7ED')
           }
@@ -96,7 +105,7 @@ export struct ExifDrawer {
 
           if (this.exif.dateTimeOriginal) {
             Row() {
-              Text('Taken At')
+              Text('拍摄时间')
                 .fontSize(13)
                 .fontColor('#909399')
               Blank()

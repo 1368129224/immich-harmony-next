@@ -141,7 +141,7 @@ export struct TimelinePage {
       // Position at the newest photos once the List has laid out the content
       this.anchorToBottom();
     } catch (err) {
-      this.loadError = err instanceof Error ? err.message : 'Unable to load server photos';
+      this.loadError = err instanceof Error ? err.message : '无法加载服务器照片';
       console.error('[TimelinePage] Failed to load timeline: ' + this.loadError);
     } finally {
       this.isLoading = false;
@@ -254,9 +254,7 @@ export struct TimelinePage {
     if (isNaN(d.getTime())) {
       return timeBucket;
     }
-    const months = ['January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'];
-    return `${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月`;
   }
 
   getColumnsTemplate(): string {
@@ -458,7 +456,7 @@ export struct TimelinePage {
     try {
       this.availableAlbums = await AppBridge.fetchAlbums();
       if (this.availableAlbums.length === 0) {
-        this.showToast('暂无可用的相册，请先在相册Tab创建');
+        this.showToast('暂无可用的相册，请先在相册页创建');
         return;
       }
       this.isAlbumPickerOpen = true;
@@ -598,7 +596,7 @@ export struct TimelinePage {
         // Top Header
         Row() {
           if (!this.isSelectionMode) {
-            Text('Photos')
+            Text('照片')
               .fontSize(22)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.theme.textPrimary)
@@ -612,7 +610,7 @@ export struct TimelinePage {
                 .fontWeight(this.currentFilter === 'ALL' ? FontWeight.Bold : FontWeight.Normal)
                 .height(26)
                 .padding({ left: 8, right: 8 })
-                .fontColor(this.currentFilter === 'ALL' ? '#FFFFFF' : '#909399')
+                .fontColor(this.currentFilter === 'ALL' ? '#FFFFFF' : this.theme.textSecondary)
                 .backgroundColor(this.currentFilter === 'ALL' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
@@ -625,7 +623,7 @@ export struct TimelinePage {
                 .fontWeight(this.currentFilter === 'CLOUD' ? FontWeight.Bold : FontWeight.Normal)
                 .height(26)
                 .padding({ left: 8, right: 8 })
-                .fontColor(this.currentFilter === 'CLOUD' ? '#FFFFFF' : '#909399')
+                .fontColor(this.currentFilter === 'CLOUD' ? '#FFFFFF' : this.theme.textSecondary)
                 .backgroundColor(this.currentFilter === 'CLOUD' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
@@ -638,7 +636,7 @@ export struct TimelinePage {
                 .fontWeight(this.currentFilter === 'LOCAL' ? FontWeight.Bold : FontWeight.Normal)
                 .height(26)
                 .padding({ left: 8, right: 8 })
-                .fontColor(this.currentFilter === 'LOCAL' ? '#FFFFFF' : '#909399')
+                .fontColor(this.currentFilter === 'LOCAL' ? '#FFFFFF' : this.theme.textSecondary)
                 .backgroundColor(this.currentFilter === 'LOCAL' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
@@ -646,16 +644,18 @@ export struct TimelinePage {
                   this.updateFlattenedAssets();
                 })
             }
-            .backgroundColor('#2C2C2E')
+            .backgroundColor(this.theme.segmentBg)
             .borderRadius(15)
             .padding(2)
             .margin({ right: 8 })
 
             // Density Indicator
-            Text(`${this.columnCount}c`)
-              .fontSize(10)
-              .fontColor('#909399')
-              .margin({ right: 4 })
+            Text(`${this.columnCount}列`)
+              .fontSize(12)
+              .fontColor(this.theme.textSecondary)
+              .maxLines(1)
+              .flexShrink(0)
+              .margin({ right: 6 })
 
             // Refresh from server
             Button() {
@@ -683,11 +683,11 @@ export struct TimelinePage {
 
             // Account / Settings Avatar Button in header
             Button({ type: ButtonType.Circle }) {
-              Image($r('app.media.icon_person')).width(20).height(20).fillColor('#A4A9B2')
+              Image($r('app.media.icon_person')).width(20).height(20).fillColor(this.theme.avatarIcon)
             }
             .width(32)
             .height(32)
-            .backgroundColor('#3A3A3C')
+            .backgroundColor(this.theme.avatarBg)
             .onClick(() => {
               this.onOpenSettings();
             })
@@ -811,7 +811,7 @@ export struct TimelinePage {
                             // Live Photo / Video Badge (Top-Right)
                             if (this.columnCount <= 8) {
                               if (asset.isLivePhoto) {
-                                Text('LIVE')
+                                Text('实况')
                                   .fontSize(this.columnCount <= 4 ? 8 : 6)
                                   .fontColor('#FFFFFF')
                                   .backgroundColor('#99000000')

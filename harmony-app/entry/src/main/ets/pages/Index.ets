@@ -99,7 +99,7 @@ struct Index {
                 }
               })
             }
-            .tabBar(this.buildTabItem('Photos', $r('app.media.icon_photos'), 0))
+            .tabBar(this.buildTabItem('照片', $r('app.media.icon_photos'), 0))
 
             // Tab 2: Albums
             TabContent() {
@@ -109,13 +109,13 @@ struct Index {
                 }
               })
             }
-            .tabBar(this.buildTabItem('Albums', $r('app.media.icon_albums'), 1))
+            .tabBar(this.buildTabItem('相册', $r('app.media.icon_albums'), 1))
 
             // Tab 3: Search
             TabContent() {
               SearchPage()
             }
-            .tabBar(this.buildTabItem('Search', $r('app.media.icon_search'), 2))
+            .tabBar(this.buildTabItem('搜索', $r('app.media.icon_search'), 2))
 
             // Tab 4: Library
             TabContent() {
@@ -129,7 +129,7 @@ struct Index {
                 }
               })
             }
-            .tabBar(this.buildTabItem('Library', $r('app.media.icon_library'), 3))
+            .tabBar(this.buildTabItem('资料库', $r('app.media.icon_library'), 3))
           }
           .onChange((index: number) => {
             this.currentTabIndex = index;

@@ -24,12 +24,12 @@ export struct DebugOverlay {
     Column() {
       // Toggle handle bar
       Row() {
-        Text(this.isExpanded ? '▼ Gesture Tuning Panel' : '▲ Gesture Tuning')
+        Text(this.isExpanded ? '▼ 手势调参面板' : '▲ 手势调参')
           .fontSize(12)
           .fontColor('#FFFFFF')
           .fontWeight(FontWeight.Medium)
         Blank()
-        Text(this.isExpanded ? 'Hide' : 'Show')
+        Text(this.isExpanded ? '隐藏' : '显示')
           .fontSize(11)
           .fontColor('#409EFF')
       }
@@ -44,7 +44,7 @@ export struct DebugOverlay {
           // Spring Response Slider
           Column({ space: 4 }) {
             Row() {
-              Text('Spring Response:')
+              Text('弹簧响应：')
                 .fontSize(11)
                 .fontColor('#DCDFE6')
               Blank()
@@ -74,7 +74,7 @@ export struct DebugOverlay {
           // Spring Damping Slider
           Column({ space: 4 }) {
             Row() {
-              Text('Spring Damping:')
+              Text('弹簧阻尼：')
                 .fontSize(11)
                 .fontColor('#DCDFE6')
               Blank()
@@ -104,7 +104,7 @@ export struct DebugOverlay {
           // Dismiss Threshold Slider
           Column({ space: 4 }) {
             Row() {
-              Text('Dismiss Threshold:')
+              Text('关闭阈值：')
                 .fontSize(11)
                 .fontColor('#DCDFE6')
               Blank()

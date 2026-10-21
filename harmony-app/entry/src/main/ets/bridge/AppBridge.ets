@@ -57,7 +57,7 @@ export class AppBridge {
       const apiService = ImmichApiService.getInstance();
       await apiService.login(serverUrl, apiKey);
       console.info('[AppBridge] Connected to real server via API Key: ' + serverUrl);
-      return 'Connected to ' + serverUrl;
+      return '已连接到 ' + serverUrl;
     } catch (err) {
       console.warn('[AppBridge] API Key authentication failed');
       throw new Error(err instanceof Error ? err.message : String(err));
@@ -69,7 +69,7 @@ export class AppBridge {
       const apiService = ImmichApiService.getInstance();
       await apiService.loginWithPassword(serverUrl, email, pass);
       console.info('[AppBridge] Logged in to server with email/password: ' + serverUrl);
-      return 'Logged in as ' + apiService.currentServer.userName;
+      return '已登录为 ' + apiService.currentServer.userName;
     } catch (err) {
       console.error('[AppBridge] Password login failed:', err);
       throw new Error(err instanceof Error ? err.message : String(err));
@@ -147,7 +147,7 @@ export class AppBridge {
     if (api.currentServer.isConnected) {
       const asset = api.getAsset(assetId);
       if (!asset) {
-        throw new Error('Server asset is not available');
+        throw new Error('服务器资源不可用');
       }
       const imagePath = await api.cacheAssetImage(assetId, 'preview');
       return {
@@ -167,7 +167,7 @@ export class AppBridge {
       return native.prepareAssetViewerBundle(assetId);
     }
 
-    throw new Error('Asset viewer is not available: Please log in to server');
+    throw new Error('资源查看器不可用：请先登录服务器');
   }
 
   public static async getAssetExif(assetId: string): Promise<ExifInfo | null> {

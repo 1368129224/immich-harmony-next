@@ -17,7 +17,7 @@ export struct LoginPage {
 
   async handleLogin(): Promise<void> {
     if (!this.serverUrl.trim()) {
-      this.errorMessage = 'Please enter Immich server URL';
+      this.errorMessage = '请输入 Immich 服务器地址';
       return;
     }
 
@@ -25,7 +25,7 @@ export struct LoginPage {
       return;
     }
     if (this.showAdvancedApiKey && !this.apiKey.trim()) {
-      this.errorMessage = 'Please enter an API Key';
+      this.errorMessage = '请输入 API Key';
       return;
     }
     this.isLoading = true;
@@ -39,7 +39,7 @@ export struct LoginPage {
       } else {
         // Standard: Login via Email + Password
         if (!this.email.trim() || !this.password) {
-          this.errorMessage = 'Please enter both Email and Password';
+          this.errorMessage = '请同时输入邮箱和密码';
           this.isLoading = false;
           return;
         }
@@ -50,7 +50,7 @@ export struct LoginPage {
       this.apiKey = '';
       this.onLoginSuccess();
     } catch (err) {
-      this.errorMessage = 'Login failed: ' + (err instanceof Error ? err.message : JSON.stringify(err));
+      this.errorMessage = '登录失败：' + (err instanceof Error ? err.message : JSON.stringify(err));
     } finally {
       this.isLoading = false;
     }
@@ -67,12 +67,12 @@ export struct LoginPage {
           .height(76)
           .borderRadius(18)
 
-        Text('Immich NEXT')
+        Text('Immich 鸿蒙版')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
 
-        Text('HarmonyOS Clean-Room Native Client')
+        Text('鸿蒙原生客户端')
           .fontSize(12)
           .fontColor('#909399')
       }
@@ -82,7 +82,7 @@ export struct LoginPage {
       Column({ space: 12 }) {
         // Server URL
         Column({ space: 4 }) {
-          Text('SERVER URL')
+          Text('服务器地址')
             .fontSize(11)
             .fontWeight(FontWeight.Bold)
             .fontColor('#909399')
@@ -105,7 +105,7 @@ export struct LoginPage {
         if (!this.showAdvancedApiKey) {
           // Primary Login: Email + Password
           Column({ space: 4 }) {
-            Text('EMAIL')
+            Text('邮箱')
               .fontSize(11)
               .fontWeight(FontWeight.Bold)
               .fontColor('#909399')
@@ -126,13 +126,13 @@ export struct LoginPage {
           .width('100%')
 
           Column({ space: 4 }) {
-            Text('PASSWORD')
+            Text('密码')
               .fontSize(11)
               .fontWeight(FontWeight.Bold)
               .fontColor('#909399')
               .width('100%')
 
-            TextInput({ text: this.password, placeholder: 'Enter password' })
+            TextInput({ text: this.password, placeholder: '请输入密码' })
               .type(InputType.Password)
               .placeholderColor('#606266')
               .fontColor('#FFFFFF')
@@ -148,13 +148,13 @@ export struct LoginPage {
         } else {
           // Advanced: API Key
           Column({ space: 4 }) {
-            Text('API KEY (ADVANCED)')
+            Text('API KEY（高级）')
               .fontSize(11)
               .fontWeight(FontWeight.Bold)
               .fontColor('#909399')
               .width('100%')
 
-            TextInput({ text: this.apiKey, placeholder: 'Immich API Key' })
+            TextInput({ text: this.apiKey, placeholder: '输入 API Key' })
               .type(InputType.Password)
               .placeholderColor('#606266')
               .fontColor('#FFFFFF')
@@ -171,7 +171,7 @@ export struct LoginPage {
 
         // Advanced Switcher Link
         Row() {
-          Button(this.showAdvancedApiKey ? 'Switch to Email & Password login' : 'Advanced: Login with API Key')
+          Button(this.showAdvancedApiKey ? '切换为邮箱和密码登录' : '高级：使用 API Key 登录')
             .fontSize(12)
             .fontColor('#409EFF')
             .backgroundColor(Color.Transparent)
@@ -194,7 +194,7 @@ export struct LoginPage {
             .width('100%')
         }
 
-        Button(this.isLoading ? 'Connecting...' : (this.showAdvancedApiKey ? 'Connect with API Key' : 'Log In'))
+        Button(this.isLoading ? '连接中...' : (this.showAdvancedApiKey ? '使用 API Key 连接' : '登录'))
           .width('100%')
           .height(46)
           .fontSize(15)

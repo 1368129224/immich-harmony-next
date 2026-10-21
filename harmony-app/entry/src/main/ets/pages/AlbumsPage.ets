@@ -33,7 +33,7 @@ export struct AlbumsPage {
       const list = await AppBridge.fetchAlbums();
       this.albums = list;
     } catch (err) {
-      this.loadError = err instanceof Error ? err.message : 'Unable to load albums';
+      this.loadError = err instanceof Error ? err.message : '无法加载相册';
       console.error('[AlbumsPage] Failed to load albums');
     } finally {
       this.isLoading = false;
@@ -71,11 +71,11 @@ export struct AlbumsPage {
   getSourceBadge(source: string): string {
     switch (source) {
       case 'MERGED':
-        return 'Merged (Local + Cloud)';
+        return '本机 + 云端';
       case 'CLOUD':
-        return 'Cloud Only';
+        return '仅云端';
       case 'LOCAL':
-        return 'Local Only';
+        return '仅本机';
       default:
         return '';
     }
@@ -124,14 +124,14 @@ export struct AlbumsPage {
     Column() {
       // Top Navigation
       Row() {
-        Text('Albums')
+        Text('相册')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
 
         Blank()
 
-        Text(`${this.columnCount} col`)
+        Text(`${this.columnCount} 列`)
           .fontSize(11)
           .fontColor('#909399')
           .margin({ right: 12 })
@@ -148,22 +148,15 @@ export struct AlbumsPage {
         .enabled(!this.isLoading)
         .onClick(() => { this.loadAlbums(); })
 
-        Button('＋ New')
-          .fontSize(13)
-          .fontColor('#409EFF')
-          .backgroundColor(Color.Transparent)
-          .onClick(() => {
-            console.info('[AlbumsPage] Create new album clicked');
-          })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
       if (this.loadError) {
         Column({ space: 8 }) {
-          Text('Unable to load albums').fontSize(15).fontColor('#FFFFFF')
+          Text('无法加载相册').fontSize(15).fontColor('#FFFFFF')
           Text(this.loadError).fontSize(12).fontColor('#F56C6C')
-          Button('Retry')
+          Button('重试')
             .fontColor('#409EFF')
             .backgroundColor(Color.Transparent)
             .onClick(() => { this.loadAlbums(); })
@@ -186,8 +179,8 @@ export struct AlbumsPage {
         Column({ space: 12 }) {
           Image($r('app.media.icon_albums'))
             .width(48).height(48).fillColor('#909399')
-          Text('No albums yet').fontSize(16).fontColor('#FFFFFF')
-          Text('Your albums will appear here.').fontSize(13).fontColor('#909399')
+          Text('暂无相册').fontSize(16).fontColor('#FFFFFF')
+          Text('相册会显示在这里。').fontSize(13).fontColor('#909399')
         }
         .width('100%')
         .layoutWeight(1)
@@ -199,7 +192,7 @@ export struct AlbumsPage {
             if (this.getPinnedAlbums().length > 0) {
               Column({ space: 10 }) {
                 Row() {
-                  Text('Pinned Albums')
+                  Text('置顶相册')
                     .fontSize(15)
                     .fontWeight(FontWeight.Bold)
                     .fontColor('#E4E7ED')
@@ -240,7 +233,7 @@ export struct AlbumsPage {
                           .maxLines(1)
                           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                        Text(`${album.count} items`)
+                        Text(`${album.count} 项`)
                           .fontSize(11)
                           .fontColor('#909399')
                       }
@@ -269,12 +262,12 @@ export struct AlbumsPage {
             // Section 2: All Albums (Alphabetical)
             Column({ space: 10 }) {
               Row() {
-                Text('All Albums')
+                Text('全部相册')
                   .fontSize(15)
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#E4E7ED')
                 Blank()
-                Text(`${this.getUnpinnedAlbums().length} albums`)
+                Text(`${this.getUnpinnedAlbums().length} 个相册`)
                   .fontSize(12)
                   .fontColor('#909399')
               }
@@ -305,7 +298,7 @@ export struct AlbumsPage {
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-                      Text(`${album.count} items`)
+                      Text(`${album.count} 项`)
                         .fontSize(11)
                         .fontColor('#909399')
                     }

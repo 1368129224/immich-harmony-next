@@ -79,7 +79,7 @@ export struct LibraryPage {
     Column() {
       // Top Title
       Row() {
-        Text('Library')
+        Text('资料库')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.theme.textPrimary)
@@ -91,44 +91,44 @@ export struct LibraryPage {
       Scroll() {
         Column({ space: 12 }) {
           // 1. Common / Favorites & Recent
-          this.buildSectionHeader('COMMON')
+          this.buildSectionHeader('常用')
           Column() {
-            this.buildListItem($r('app.media.icon_heart'), 'Favorites', 'favorites')
+            this.buildListItem($r('app.media.icon_heart'), '收藏', 'favorites')
             Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_clock'), 'Recently Added', 'recently_added')
+            this.buildListItem($r('app.media.icon_clock'), '最近添加', 'recently_added')
           }
           .borderRadius(12)
           .clip(true)
           .width('92%')
 
           // 2. Media Types
-          this.buildSectionHeader('MEDIA TYPES')
+          this.buildSectionHeader('媒体类型')
           Column() {
-            this.buildListItem($r('app.media.icon_video'), 'Videos', 'videos')
+            this.buildListItem($r('app.media.icon_video'), '视频', 'videos')
             Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_live_photo'), 'Live Photos', 'live_photos')
+            this.buildListItem($r('app.media.icon_live_photo'), '实况照片', 'live_photos')
             Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_panorama'), 'Panoramas', 'panoramas')
+            this.buildListItem($r('app.media.icon_panorama'), '全景照片', 'panoramas')
             Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_phone'), 'Screenshots', 'screenshots')
+            this.buildListItem($r('app.media.icon_phone'), '截图', 'screenshots')
           }
           .borderRadius(12)
           .clip(true)
           .width('92%')
 
           // 3. Management
-          this.buildSectionHeader('MANAGEMENT')
+          this.buildSectionHeader('管理')
           Column() {
-            this.buildListItem($r('app.media.icon_archive'), 'Archive', 'archive')
+            this.buildListItem($r('app.media.icon_archive'), '归档', 'archive')
             Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_cloud_trash'), 'Trash (Immich Cloud)', 'trash')
+            this.buildListItem($r('app.media.icon_cloud_trash'), '回收站（Immich 云端）', 'trash')
           }
           .borderRadius(12)
           .clip(true)
           .width('92%')
 
           // 4. Settings: appearance and cache
-          this.buildSectionHeader('SETTINGS')
+          this.buildSectionHeader('设置')
           Column() {
             Row() {
               Text('跟随系统外观')

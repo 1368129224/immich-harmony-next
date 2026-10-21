@@ -88,7 +88,7 @@ export struct AssetViewerPage {
         this.exifData = fallbackExif;
       }
     } catch (err) {
-      this.mediaError = err instanceof Error ? err.message : 'Unable to load preview';
+      this.mediaError = err instanceof Error ? err.message : '无法加载预览';
       console.error('[AssetViewerPage] Failed to load media preview');
     } finally {
       this.isLoadingMedia = false;
@@ -150,32 +150,32 @@ export struct AssetViewerPage {
   async handleToggleFavorite(): Promise<void> {
     const nextState = await AppBridge.toggleFavorite(this.activeAsset.id, this.activeAsset.isFavorite);
     this.activeAsset.isFavorite = nextState;
-    this.showToast(nextState ? 'Added to Favorites' : 'Removed from Favorites');
+    this.showToast(nextState ? '已添加到收藏' : '已从收藏移除');
   }
 
   async handleConfirmDeleteLocal(): Promise<void> {
     await AppBridge.deleteLocalAsset(this.activeAsset.id);
     this.showDeleteLocalDialog = false;
     this.activeAsset.hasLocalOriginal = false;
-    this.showToast('Local photo deleted. Cloud copy preserved.');
+    this.showToast('本机照片已删除，云端副本已保留。');
   }
 
   async handleConfirmCloudTrash(): Promise<void> {
     await AppBridge.trashCloudAsset(this.activeAsset.id);
     this.showCloudTrashDialog = false;
     this.activeAsset.hasCloudOriginal = false;
-    this.showToast('Moved to Cloud Trash. Auto-reupload stopped.');
+    this.showToast('已移入云端回收站，已停止自动重新上传。');
   }
 
   async handleConfirmShare(): Promise<void> {
     await AppBridge.shareAsset(this.activeAsset.id, this.shareFormat, this.stripGpsForShare);
     this.showShareDialog = false;
-    this.showToast(`Shared as ${this.shareFormat}${this.stripGpsForShare ? ' (GPS removed)' : ''}`);
+    this.showToast(`已分享（${this.shareFormat === 'ORIGINAL' ? '原图' : (this.shareFormat === 'COMPATIBLE' ? '兼容格式' : '云端链接')}）${this.stripGpsForShare ? '，已移除位置信息' : ''}`);
   }
 
   async handleDownloadOriginal(): Promise<void> {
     await AppBridge.downloadAssetOriginal(this.activeAsset.id);
-    this.showToast('Original image saved to System Gallery');
+    this.showToast('原图已保存到系统相册');
   }
 
   @Builder
@@ -189,7 +189,7 @@ export struct AssetViewerPage {
       } else if (this.mediaError && asset.id === this.activeAsset.id) {
         Column({ space: 12 }) {
           Text(this.mediaError).fontSize(14).fontColor('#F56C6C')
-          Button('Retry').onClick(() => { this.loadMediaBundle(this.activeAsset.id); })
+          Button('重试').onClick(() => { this.loadMediaBundle(this.activeAsset.id); })
         }
       } else {
         Image(asset.id === this.activeAsset.id
@@ -215,13 +215,13 @@ export struct AssetViewerPage {
           .backgroundColor('#99000000')
           .onClick(() => {
             this.isVideoPlaying = true;
-            this.showToast('Playing video...');
+            this.showToast('正在播放视频...');
           })
         }
 
         // Live Photo Playing Indicator (Spec 3.4)
         if (this.isLivePlaying && asset.isLivePhoto) {
-          Text('PLAYING LIVE')
+          Text('正在播放实况')
             .fontSize(12)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
@@ -316,7 +316,7 @@ export struct AssetViewerPage {
       // Top Header Controls (Visible when showToolbars = true)
       if (this.showToolbars) {
         Row() {
-          Button('Back')
+          Button('返回')
             .fontSize(13)
             .fontColor('#FFFFFF')
             .backgroundColor('#44000000')
@@ -330,7 +330,7 @@ export struct AssetViewerPage {
 
           // Live Photo visible toggle button (Spec 3.4)
           if (this.activeAsset.isLivePhoto) {
-            Button('LIVE')
+            Button('实况')
               .fontSize(11)
               .fontColor('#FFFFFF')
               .fontWeight(FontWeight.Bold)
@@ -345,7 +345,7 @@ export struct AssetViewerPage {
 
           // Active Download to System Gallery button (Spec 3.6: download saves to system gallery)
           if (this.activeAsset.hasCloudOriginal) {
-            Button('Download')
+            Button('下载')
               .fontSize(12)
               .fontColor('#FFFFFF')
               .backgroundColor('#44000000')
@@ -357,7 +357,7 @@ export struct AssetViewerPage {
               })
           }
 
-          Button('Info')
+          Button('信息')
             .fontSize(13)
             .fontColor('#FFFFFF')
             .backgroundColor('#44000000')
@@ -408,7 +408,7 @@ export struct AssetViewerPage {
               Text(this.activeAsset.isFavorite ? '♥' : '♡')
                 .fontSize(18)
                 .fontColor(this.activeAsset.isFavorite ? '#F56C6C' : '#FFFFFF')
-              Text('Favorite')
+              Text('收藏')
                 .fontSize(10)
                 .fontColor(this.activeAsset.isFavorite ? '#F56C6C' : '#E4E7ED')
             }
@@ -422,13 +422,13 @@ export struct AssetViewerPage {
               Text('＋')
                 .fontSize(18)
                 .fontColor('#FFFFFF')
-              Text('Album')
+              Text('相册')
                 .fontSize(10)
                 .fontColor('#E4E7ED')
             }
             .layoutWeight(1)
             .onClick(() => {
-              this.showToast('Select album to add...');
+              this.showToast('请选择要添加的相册...');
             })
 
             // 3. Delete Local (if local exists)
@@ -438,7 +438,7 @@ export struct AssetViewerPage {
                   .width(20)
                   .height(20)
                   .fillColor('#F56C6C')
-                Text('Del Local')
+                Text('删除本机')
                   .fontSize(10)
                   .fontColor('#F56C6C')
               }
@@ -455,7 +455,7 @@ export struct AssetViewerPage {
                   .width(20)
                   .height(20)
                   .fillColor('#E6A23C')
-                Text('Cloud Trash')
+                Text('云端回收站')
                   .fontSize(10)
                   .fontColor('#E6A23C')
               }
@@ -470,7 +470,7 @@ export struct AssetViewerPage {
               Text('↗')
                 .fontSize(18)
                 .fontColor('#409EFF')
-              Text('Share')
+              Text('分享')
                 .fontSize(10)
                 .fontColor('#409EFF')
             }
@@ -519,14 +519,14 @@ export struct AssetViewerPage {
             })
 
           Column({ space: 14 }) {
-            Text('Delete Local Copy')
+            Text('删除本机副本')
               .fontSize(17)
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
 
             Text(this.activeAsset.hasCloudOriginal
-              ? 'This will only delete the copy on this device. The cloud backup in Immich remains safe. Auto-upload will stop for this photo unless manually uploaded.'
-              : 'This photo has NOT been backed up to Immich yet. Deleting it will permanently remove it from your device.')
+              ? '仅删除本设备上的副本，Immich 中的云端备份不受影响。除非手动上传，此照片将不再自动上传。'
+              : '此照片尚未备份到 Immich。删除后将从本设备永久移除。')
               .fontSize(13)
               .fontColor('#DCDFE6')
               .lineHeight(18)
@@ -537,14 +537,14 @@ export struct AssetViewerPage {
                 .onChange((val: boolean) => {
                   this.dontRemindChecked = val;
                 })
-              Text("Don't ask again for this account")
+              Text('此账号不再提示')
                 .fontSize(12)
                 .fontColor('#909399')
             }
             .width('100%')
 
             Row({ space: 10 }) {
-              Button('Cancel')
+              Button('取消')
                 .layoutWeight(1)
                 .height(40)
                 .backgroundColor('#2C2C2E')
@@ -553,7 +553,7 @@ export struct AssetViewerPage {
                   this.showDeleteLocalDialog = false;
                 })
 
-              Button('Delete Local')
+              Button('删除本机')
                 .layoutWeight(1)
                 .height(40)
                 .backgroundColor('#F56C6C')
@@ -585,12 +585,12 @@ export struct AssetViewerPage {
             })
 
           Column({ space: 14 }) {
-            Text('Move to Immich Cloud Trash')
+            Text('移入 Immich 云端回收站')
               .fontSize(17)
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
 
-            Text('This will move the asset to the Immich server trash. Your local gallery original will remain intact. Auto-upload is stopped to prevent accidental re-upload.')
+            Text('将此资源移入 Immich 服务器回收站。本机相册原件保持不变，并已停止自动上传以防误重新上传。')
               .fontSize(13)
               .fontColor('#DCDFE6')
               .lineHeight(18)
@@ -601,14 +601,14 @@ export struct AssetViewerPage {
                 .onChange((val: boolean) => {
                   this.dontRemindChecked = val;
                 })
-              Text("Don't ask again for this account")
+              Text('此账号不再提示')
                 .fontSize(12)
                 .fontColor('#909399')
             }
             .width('100%')
 
             Row({ space: 10 }) {
-              Button('Cancel')
+              Button('取消')
                 .layoutWeight(1)
                 .height(40)
                 .backgroundColor('#2C2C2E')
@@ -617,7 +617,7 @@ export struct AssetViewerPage {
                   this.showCloudTrashDialog = false;
                 })
 
-              Button('Move to Trash')
+              Button('移入回收站')
                 .layoutWeight(1)
                 .height(40)
                 .backgroundColor('#E6A23C')
@@ -650,12 +650,12 @@ export struct AssetViewerPage {
 
           Column({ space: 14 }) {
             Row() {
-              Text('Share Media')
+              Text('分享媒体')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#FFFFFF')
               Blank()
-              Button('Close')
+              Button('关闭')
                 .fontSize(12)
                 .fontColor('#909399')
                 .backgroundColor(Color.Transparent)
@@ -667,13 +667,13 @@ export struct AssetViewerPage {
 
             // Format Selection
             Column({ space: 8 }) {
-              Text('Format:')
+              Text('格式：')
                 .fontSize(13)
                 .fontColor('#909399')
                 .width('100%')
 
               Row({ space: 8 }) {
-                Button('Original')
+                Button('原图')
                   .layoutWeight(1)
                   .height(36)
                   .fontSize(12)
@@ -683,7 +683,7 @@ export struct AssetViewerPage {
                     this.shareFormat = 'ORIGINAL';
                   })
 
-                Button('Compatible')
+                Button('兼容格式')
                   .layoutWeight(1)
                   .height(36)
                   .fontSize(12)
@@ -693,7 +693,7 @@ export struct AssetViewerPage {
                     this.shareFormat = 'COMPATIBLE';
                   })
 
-                Button('Cloud Link')
+                Button('云端链接')
                   .layoutWeight(1)
                   .height(36)
                   .fontSize(12)
@@ -710,10 +710,10 @@ export struct AssetViewerPage {
             // Strip GPS Option (Spec 3.5 requirement)
             Row() {
               Column({ space: 2 }) {
-                Text('Strip GPS Location')
+                Text('移除位置信息')
                   .fontSize(13)
                   .fontColor('#FFFFFF')
-                Text('Protect privacy by removing location from shared copy')
+                Text('分享副本中移除位置信息，保护隐私')
                   .fontSize(11)
                   .fontColor('#909399')
               }
@@ -730,7 +730,7 @@ export struct AssetViewerPage {
             .width('100%')
             .padding({ top: 8, bottom: 8 })
 
-            Button('Share via HarmonyOS Share')
+            Button('通过鸿蒙分享')
               .width('100%')
               .height(44)
               .fontSize(14)

@@ -43,18 +43,18 @@ export struct AccountSettingsDialog {
   async handleSwitchAccount(acc: AccountInfo): Promise<void> {
     await AppBridge.switchAccount(acc.id);
     await this.refreshData();
-    this.showToast(`Switched to ${acc.name}`);
+    this.showToast(`已切换到 ${acc.name}`);
   }
 
   async handleClearCache(acc: AccountInfo): Promise<void> {
     await AppBridge.clearAccountCache(acc.id);
     await this.refreshData();
-    this.showToast(`App cache cleared for ${acc.name}. Gallery originals and credentials preserved.`);
+    this.showToast(`已清理 ${acc.name} 的应用缓存，本机相册原件与登录凭据已保留。`);
   }
 
   async handleUpdateServer(): Promise<void> {
     if (!this.customServerUrl.trim()) {
-      this.showToast('Please enter a valid server URL');
+      this.showToast('请输入有效的服务器地址');
       return;
     }
     this.isTestingConnection = true;
@@ -62,24 +62,24 @@ export struct AccountSettingsDialog {
       let res = '';
       if (this.useApiKeyMode) {
         if (!this.customApiKey.trim()) {
-          this.showToast('Please enter an API Key');
+          this.showToast('请输入 API Key');
           this.isTestingConnection = false;
           return;
         }
         res = await AppBridge.loginServer(this.customServerUrl.trim(), this.customApiKey.trim());
       } else {
         if (!this.customEmail.trim() || !this.customPassword) {
-          this.showToast('Please enter Email and Password');
+          this.showToast('请输入邮箱和密码');
           this.isTestingConnection = false;
           return;
         }
         res = await AppBridge.loginWithPassword(this.customServerUrl.trim(), this.customEmail.trim(), this.customPassword);
       }
       await this.refreshData();
-      this.showToast(res || 'Connected to server successfully');
+      this.showToast(res || '已成功连接服务器');
       this.showCustomServerEditor = false;
     } catch (err) {
-      this.showToast('Failed to connect: ' + (err instanceof Error ? err.message : JSON.stringify(err)));
+      this.showToast('连接失败：' + (err instanceof Error ? err.message : JSON.stringify(err)));
     } finally {
       this.isTestingConnection = false;
     }
@@ -87,7 +87,7 @@ export struct AccountSettingsDialog {
   async handleToggleBackup(val: boolean): Promise<void> {
     this.backupConfig.enabled = val;
     await AppBridge.updateBackupConfig(this.backupConfig);
-    this.showToast(val ? 'Automatic backup enabled (Wi-Fi Only)' : 'Backup paused');
+    this.showToast(val ? '已开启自动备份（仅 Wi-Fi）' : '已暂停备份');
   }
 
   build() {
@@ -119,12 +119,12 @@ export struct AccountSettingsDialog {
 
           // Header
           Row() {
-            Text('Account & Settings')
+            Text('账号与设置')
               .fontSize(18)
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
             Blank()
-            Button('Done')
+            Button('完成')
               .fontSize(13)
               .fontColor('#409EFF')
               .backgroundColor(Color.Transparent)
@@ -154,7 +154,7 @@ export struct AccountSettingsDialog {
                       Text(this.getCurrentAccount()?.email || '')
                         .fontSize(12)
                         .fontColor('#909399')
-                      Text('Connected: ' + (this.getCurrentAccount()?.serverUrl || ''))
+                      Text('已连接：' + (this.getCurrentAccount()?.serverUrl || ''))
                         .fontSize(11)
                         .fontColor('#67C23A')
                     }
@@ -162,7 +162,7 @@ export struct AccountSettingsDialog {
 
                     Blank()
 
-                    Text('Active')
+                    Text('当前')
                       .fontSize(11)
                       .fontColor('#67C23A')
                       .backgroundColor('#2267C23A')
@@ -173,7 +173,7 @@ export struct AccountSettingsDialog {
 
                   // Quick Server Settings Toggle
                   Row() {
-                    Text(this.showCustomServerEditor ? 'Hide Server Configuration ▲' : 'Configure Server & Login ▼')
+                    Text(this.showCustomServerEditor ? '收起服务器配置 ▲' : '配置服务器与登录 ▼')
                       .fontSize(11)
                       .fontColor('#409EFF')
                       .onClick(() => {
@@ -184,7 +184,7 @@ export struct AccountSettingsDialog {
 
                   if (this.showCustomServerEditor) {
                     Column({ space: 8 }) {
-                      TextInput({ text: this.customServerUrl, placeholder: 'Server URL (https://...)' })
+                      TextInput({ text: this.customServerUrl, placeholder: '服务器地址（https://...）' })
                         .fontSize(12)
                         .fontColor('#FFFFFF')
                         .backgroundColor('#1C1C1E')
@@ -195,7 +195,7 @@ export struct AccountSettingsDialog {
                         })
 
                       if (!this.useApiKeyMode) {
-                        TextInput({ text: this.customEmail, placeholder: 'Email' })
+                        TextInput({ text: this.customEmail, placeholder: '邮箱' })
                           .type(InputType.Email)
                           .fontSize(12)
                           .fontColor('#FFFFFF')
@@ -206,7 +206,7 @@ export struct AccountSettingsDialog {
                             this.customEmail = val;
                           })
 
-                        TextInput({ text: this.customPassword, placeholder: 'Password' })
+                        TextInput({ text: this.customPassword, placeholder: '密码' })
                           .type(InputType.Password)
                           .fontSize(12)
                           .fontColor('#FFFFFF')
@@ -217,7 +217,7 @@ export struct AccountSettingsDialog {
                             this.customPassword = val;
                           })
                       } else {
-                        TextInput({ text: this.customApiKey, placeholder: 'API Key (Advanced)' })
+                        TextInput({ text: this.customApiKey, placeholder: 'API Key（高级）' })
                           .type(InputType.Password)
                           .fontSize(12)
                           .fontColor('#FFFFFF')
@@ -230,7 +230,7 @@ export struct AccountSettingsDialog {
                       }
 
                       Row() {
-                        Text(this.useApiKeyMode ? 'Use Email & Password' : 'Advanced: Use API Key')
+                        Text(this.useApiKeyMode ? '使用邮箱和密码' : '高级：使用 API Key')
                           .fontSize(11)
                           .fontColor('#409EFF')
                           .onClick(() => {
@@ -240,7 +240,7 @@ export struct AccountSettingsDialog {
                       .width('100%')
                       .justifyContent(FlexAlign.End)
 
-                      Button(this.isTestingConnection ? 'Connecting...' : (this.useApiKeyMode ? 'Connect with API Key' : 'Log In & Sync'))
+                      Button(this.isTestingConnection ? '连接中...' : (this.useApiKeyMode ? '使用 API Key 连接' : '登录并同步'))
                         .fontSize(12)
                         .height(36)
                         .width('100%')
@@ -266,7 +266,7 @@ export struct AccountSettingsDialog {
 
               // Switch Accounts List
               Column({ space: 8 }) {
-                Text('SWITCH SERVER / ACCOUNT')
+                Text('切换服务器 / 账号')
                   .fontSize(12)
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#909399')
@@ -289,12 +289,12 @@ export struct AccountSettingsDialog {
                       Blank()
 
                       if (acc.isCurrent) {
-                        Text('✓ Current')
+                        Text('✓ 当前')
                           .fontSize(12)
                           .fontColor('#409EFF')
                           .margin({ right: 10 })
                       } else {
-                        Button('Switch')
+                        Button('切换')
                           .fontSize(11)
                           .height(28)
                           .padding({ left: 10, right: 10 })
@@ -307,7 +307,7 @@ export struct AccountSettingsDialog {
                       }
 
                       // Clear Cache Button for this account
-                      Button(`Clean (${acc.cacheSizeMB}M)`)
+                      Button('清理缓存')
                         .fontSize(11)
                         .height(28)
                         .padding({ left: 8, right: 8 })
@@ -328,7 +328,7 @@ export struct AccountSettingsDialog {
 
               // Automatic Backup Section (Spec 2.1.1)
               Column({ space: 8 }) {
-                Text('AUTOMATIC BACKUP')
+                Text('自动备份')
                   .fontSize(12)
                   .fontWeight(FontWeight.Bold)
                   .fontColor('#909399')
@@ -337,10 +337,10 @@ export struct AccountSettingsDialog {
                 Column({ space: 12 }) {
                   Row() {
                     Column({ space: 2 }) {
-                      Text('Backup Current Account')
+                      Text('备份当前账号')
                         .fontSize(14)
                         .fontColor('#FFFFFF')
-                      Text('Only active account backs up automatically')
+                      Text('仅当前账号会自动备份')
                         .fontSize(11)
                         .fontColor('#909399')
                     }
@@ -359,7 +359,7 @@ export struct AccountSettingsDialog {
                   Divider().color('#333336')
 
                   Row() {
-                    Text('Wi-Fi Only (Default: On)')
+                    Text('仅 Wi-Fi（默认开启）')
                       .fontSize(13)
                       .fontColor('#DCDFE6')
                     Blank()
@@ -373,7 +373,7 @@ export struct AccountSettingsDialog {
                   .width('100%')
 
                   Row() {
-                    Text('Require Charging (Default: Off)')
+                    Text('需要充电（默认关闭）')
                       .fontSize(13)
                       .fontColor('#DCDFE6')
                     Blank()
@@ -393,7 +393,7 @@ export struct AccountSettingsDialog {
               .width('100%')
 
               // Logout Button
-              Button('Log Out from Immich')
+              Button('退出 Immich 登录')
                 .width('100%')
                 .height(44)
                 .fontSize(14)

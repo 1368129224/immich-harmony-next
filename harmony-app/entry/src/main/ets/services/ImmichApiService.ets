@@ -96,7 +96,7 @@ export class ImmichApiService {
           apiKey: data.apiKey || '',
           accessToken: data.accessToken,
           userEmail: data.userEmail || '',
-          userName: data.userName || 'Immich User',
+          userName: data.userName || data.userEmail || '',
           isConnected: true,
         };
         console.info('[ImmichApi] Restored saved session for ' + this.currentServer.userEmail);
@@ -158,7 +158,7 @@ export class ImmichApiService {
       }
       console.info(`[ImmichApi] Timeline ${endpoint}: HTTP ${response.responseCode}`);
       if (response.responseCode !== 200) {
-        throw new Error(`Timeline ${endpoint}: HTTP ${response.responseCode}`);
+        throw new Error(`时间线（${endpoint}）请求失败：HTTP ${response.responseCode}`);
       }
       return response.result as string;
     } catch (error) {
@@ -198,10 +198,10 @@ export class ImmichApiService {
 
   public async cacheAssetImage(id: string, size: string = 'thumbnail'): Promise<string> {
     if (size !== 'thumbnail' && size !== 'preview') {
-      throw new Error('Unsupported image size');
+      throw new Error('不支持的图片尺寸');
     }
     if (!this.cacheDir || !this.currentServer.isConnected) {
-      throw new Error('Media cache or authenticated session is unavailable');
+      throw new Error('媒体缓存或登录会话不可用');
     }
     // Account-scoped cache prevents another account reusing cached private media.
     const scope = encodeURIComponent(this.currentServer.serverUrl + '|' + this.currentServer.userEmail);
@@ -251,11 +251,11 @@ export class ImmichApiService {
       }
 
       if (response.responseCode !== 200) {
-        throw new Error(`Image ${size}: HTTP ${response.responseCode}`);
+        throw new Error(`图片（${size}）请求失败：HTTP ${response.responseCode}`);
       }
       const data = response.result as ArrayBuffer;
       if (data.byteLength === 0) {
-        throw new Error('Server returned an empty image');
+        throw new Error('服务器返回了空图片');
       }
 
       this.ensureDir(directory);
@@ -264,7 +264,7 @@ export class ImmichApiService {
       try {
         const written = fs.writeSync(file.fd, data);
         if (written !== data.byteLength) {
-          throw new Error('Incomplete image cache write');
+          throw new Error('图片缓存写入不完整');
         }
       } finally {
         fs.closeSync(file);
@@ -295,8 +295,8 @@ export class ImmichApiService {
     serverUrl: 'https://photo.v6.sora233.eu.org:59418',
     apiKey: '',
     accessToken: undefined,
-    userEmail: 'user@immich.cloud',
-    userName: 'Immich Cloud User',
+    userEmail: '',
+    userName: '',
     isConnected: false,
   };
 
@@ -344,7 +344,7 @@ export class ImmichApiService {
 
       console.info(`[ImmichApi] Login HTTP status: ${loginResp.responseCode}`);
       if (loginResp.responseCode !== 200 && loginResp.responseCode !== 201) {
-        let msg = 'Incorrect email or password';
+        let msg = '邮箱或密码错误';
         if (loginResp.result) {
           try {
             const errObj = JSON.parse(loginResp.result as string) as Record<string, string>;
@@ -360,14 +360,14 @@ export class ImmichApiService {
       const token = (resData['accessToken'] as string) || '';
       const userObj = resData['user'] as Record<string, string> || {};
       if (typeof token !== 'string' || token.trim().length === 0) {
-        throw new Error('Server did not return an access token');
+        throw new Error('服务器未返回访问令牌');
       }
 
       this.currentServer.serverUrl = cleanUrl;
       this.currentServer.accessToken = token;
       this.currentServer.apiKey = '';
       this.currentServer.userEmail = userObj.email || (resData['userEmail'] as string) || email.trim();
-      this.currentServer.userName = userObj.name || (resData['name'] as string) || 'Immich User';
+      this.currentServer.userName = userObj.name || (resData['name'] as string) || email.trim();
       this.currentServer.isConnected = true;
       this.assets.clear();
       this.albums.clear();
@@ -389,7 +389,7 @@ export class ImmichApiService {
     const cleanUrl = this.normalizeUrl(serverUrl);
     const cleanKey = apiKey.trim();
     if (!cleanKey) {
-      throw new Error('Please enter an API Key');
+      throw new Error('请输入 API Key');
     }
     console.info(`[ImmichApi] Attempting login to: ${cleanUrl}`);
 
@@ -411,7 +411,7 @@ export class ImmichApiService {
           readTimeout: 6000,
         });
         if (fallbackPing.responseCode !== 200) {
-          throw new Error(`Server ping failed (HTTP ${pingResp.responseCode})`);
+          throw new Error(`服务器连通性检查失败（HTTP ${pingResp.responseCode}）`);
         }
       }
 
@@ -426,7 +426,7 @@ export class ImmichApiService {
         readTimeout: 8000,
       });
       if (userResp.responseCode !== 200 || !userResp.result) {
-        throw new Error(`API Key authentication failed (HTTP ${userResp.responseCode})`);
+        throw new Error(`API Key 认证失败（HTTP ${userResp.responseCode}）`);
       }
       const userData = JSON.parse(userResp.result as string) as Record<string, string>;
       this.currentServer = {
@@ -434,7 +434,7 @@ export class ImmichApiService {
         apiKey: cleanKey,
         accessToken: undefined,
         userEmail: userData.email || '',
-        userName: userData.name || 'Immich User',
+        userName: userData.name || userData.email || '',
         isConnected: true,
       };
       this.assets.clear();
@@ -462,13 +462,13 @@ export class ImmichApiService {
     const json = await this.timelineRequest('buckets');
     const rawList = JSON.parse(json) as Array<Record<string, Object>>;
     if (!Array.isArray(rawList)) {
-      throw new Error('Unsupported timeline buckets response');
+      throw new Error('不支持的时间线分组响应');
     }
     const buckets: TimeBucketItem[] = [];
     for (const bucket of rawList) {
       const date = bucket['timeBucket'] as string;
       if (typeof date !== 'string' || !date) {
-        throw new Error('Invalid timeline bucket date');
+        throw new Error('时间线分组日期无效');
       }
       buckets.push(new TimeBucketItem(date, Number(bucket['count'] || 0)));
     }
@@ -518,7 +518,7 @@ export class ImmichApiService {
 
   public async apiRequest(path: string, method: http.RequestMethod = http.RequestMethod.GET, body?: string): Promise<string> {
     if (!this.currentServer.isConnected) {
-      throw new Error('Please log in to perform this operation');
+      throw new Error('请先登录再执行此操作');
     }
     const request = http.createHttp();
     try {
@@ -537,7 +537,7 @@ export class ImmichApiService {
       });
       console.info(`[ImmichApi] API ${cleanPath}: HTTP ${response.responseCode}`);
       if (response.responseCode < 200 || response.responseCode >= 300) {
-        throw new Error(`API error: HTTP ${response.responseCode}`);
+        throw new Error(`接口请求失败：HTTP ${response.responseCode}`);
       }
       return response.result as string;
     } catch (error) {
@@ -613,7 +613,7 @@ export class ImmichApiService {
 
   public async fetchAlbumAssetsPage(albumId: string, page: number = 1, cursor?: string): Promise<AlbumAssetPage> {
     if (!albumId || !Number.isInteger(page) || page < 1) {
-      throw new Error('Invalid album page request');
+      throw new Error('相册分页请求无效');
     }
     const body = cursor ? JSON.stringify({ albumIds: [albumId], size: 200, cursor: cursor, order: 'asc' }) :
       JSON.stringify({ albumIds: [albumId], size: 200, page: page, order: 'asc' });
@@ -621,7 +621,7 @@ export class ImmichApiService {
     const result = parseAlbumAssetPage(await this.apiRequest('search/metadata', http.RequestMethod.POST, body));
     if ((result.nextPage !== undefined && result.nextPage <= page && !cursor) ||
       (cursor !== undefined && result.nextCursor === cursor)) {
-      throw new Error('Server album pagination did not advance');
+      throw new Error('服务器相册分页没有前进');
     }
     const assets: AssetItem[] = [];
     for (const row of result.items) {

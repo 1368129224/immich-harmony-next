@@ -20,24 +20,29 @@ interface ColumnarAssetsDto {
 }
 
 export function parseTimelineAssets(json: string): TimelineAssetDto[] {
-  const raw: Object = JSON.parse(json) as Object;
+  let raw: Object;
+  try {
+    raw = JSON.parse(json) as Object;
+  } catch (err) {
+    throw new Error(`时间线响应不是有效的 JSON：${err}`);
+  }
   if (Array.isArray(raw)) {
     const rows = raw as TimelineAssetDto[];
     for (const row of rows) {
       if (typeof row.id !== 'string' || !row.id) {
-        throw new Error('Invalid timeline asset ID');
+        throw new Error('时间线资源 ID 无效');
       }
     }
     return rows;
   }
   const columns = raw as ColumnarAssetsDto;
   if (!columns || !Array.isArray(columns.id)) {
-    throw new Error('Unsupported timeline response: expected asset array or ID columns');
+    throw new Error('不支持的时间线响应：需要资源数组或 ID 列');
   }
   const rows: TimelineAssetDto[] = [];
   for (let i = 0; i < columns.id.length; i++) {
     if (typeof columns.id[i] !== 'string' || !columns.id[i]) {
-      throw new Error('Invalid timeline asset ID');
+      throw new Error('时间线资源 ID 无效');
     }
     rows.push({
       id: columns.id[i],

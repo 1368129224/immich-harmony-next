@@ -45,6 +45,9 @@ export class ThemeService {
   get divider(): string { return this.isDark ? '#2C2C2E' : '#E5E5EA'; }
   get iconTint(): string { return this.isDark ? '#DCDFE6' : '#3A3A3C'; }
   get tabBarBg(): string { return this.isDark ? '#000000' : '#FFFFFF'; }
+  get segmentBg(): string { return this.isDark ? '#2C2C2E' : '#E5E5EA'; }
+  get avatarBg(): string { return this.isDark ? '#3A3A3C' : '#D1D1D6'; }
+  get avatarIcon(): string { return this.isDark ? '#A4A9B2' : '#48484A'; }
 
   /** Called once from EntryAbility.onCreate with the ability context. */
   public init(context: common.UIAbilityContext, filesDir: string, appContext: common.ApplicationContext): void {

@@ -31,7 +31,7 @@ export struct FilmstripScrubber {
             }
 
             if (item.isLivePhoto) {
-              Text('LIVE')
+              Text('实况')
                 .fontSize(8)
                 .fontColor('#FFFFFF')
                 .backgroundColor('#88000000')
