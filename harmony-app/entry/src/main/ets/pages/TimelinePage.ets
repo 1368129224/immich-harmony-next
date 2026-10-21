@@ -67,6 +67,17 @@ export struct TimelinePage {
 
   @Param scrollToLatestTrigger: number = 0;
   @Param mediaVersion: number = 0;
+  // Library collection mode (favorites, videos, live photos, archive, trash, recently added).
+  // Same grid, grouping, selection and batch actions as the Photos timeline; only the data source differs.
+  @Param collectionKind: string = '';
+  @Param collectionTitle: string = '';
+  @Event onBack: () => void = () => {};
+  private collectionAssets: AssetItem[] = [];
+  private collectionPage: number = 1;
+  private collectionCursor: string | undefined = undefined;
+  private collectionHasMore: boolean = false;
+  // Bumped on every (re)load so background page loops from a previous load stop
+  private collectionEpoch: number = 0;
   @Local theme: ThemeService = ThemeService.getInstance();
   // Changes the grid item identity so every thumbnail is rebuilt after a cache clear
   @Local thumbEpoch: number = 0;
@@ -98,6 +109,109 @@ export struct TimelinePage {
     this.loadTimeline();
   }
 
+  isCollectionMode(): boolean {
+    return this.collectionKind !== '';
+  }
+
+  /**
+   * Collection mode: load the newest page first and open at the bottom, then pull the remaining
+   * pages in the background. Older pages are merged in front; the view stays at the bottom while the user is there.
+   */
+  async loadCollection(): Promise<void> {
+    if (this.isLoading) {
+      return;
+    }
+    const epoch = ++this.collectionEpoch;
+    this.isLoading = true;
+    this.loadError = '';
+    this.collectionAssets = [];
+    this.collectionPage = 1;
+    this.collectionCursor = undefined;
+    this.collectionHasMore = true;
+    try {
+      await this.fetchNextCollectionPage(epoch);
+      this.anchorToBottom();
+    } catch (err) {
+      this.loadError = err instanceof Error ? err.message : '无法加载集合内容';
+      console.error('[TimelinePage] Failed to load collection: ' + this.loadError);
+      return;
+    } finally {
+      this.isLoading = false;
+    }
+    this.loadRemainingCollectionPages(epoch);
+  }
+
+  private async fetchNextCollectionPage(epoch: number): Promise<void> {
+    const result = await AppBridge.fetchCollectionPage(this.collectionKind, this.collectionPage, this.collectionCursor);
+    if (epoch !== this.collectionEpoch) {
+      return; // a newer load started while this page was in flight
+    }
+    const known = new Set<string>(this.collectionAssets.map((a: AssetItem) => a.id));
+    for (const asset of result.assets) {
+      if (!known.has(asset.id)) {
+        known.add(asset.id);
+        this.collectionAssets.push(asset);
+      }
+    }
+    this.collectionAssets.sort((a: AssetItem, b: AssetItem) => this.assetTimeOf(a) - this.assetTimeOf(b));
+    this.collectionHasMore = result.nextPage !== undefined || !!result.nextCursor;
+    // Advance only after success so a failed page can be retried
+    this.collectionPage = result.nextPage ?? (this.collectionPage + 1);
+    this.collectionCursor = result.nextCursor;
+    this.rebuildCollectionBuckets();
+  }
+
+  private async loadRemainingCollectionPages(epoch: number): Promise<void> {
+    try {
+      while (this.collectionHasMore && epoch === this.collectionEpoch) {
+        const wasAtBottom = this.isAtBottom;
+        await this.fetchNextCollectionPage(epoch);
+        if (wasAtBottom && epoch === this.collectionEpoch) {
+          this.anchorToBottom();
+        }
+      }
+    } catch (err) {
+      console.warn('[TimelinePage] Background collection load stopped: ' + err);
+      this.showToast('部分内容加载失败，请点击刷新重试');
+    }
+  }
+
+  private assetTimeOf(asset: AssetItem): number {
+    const t = new Date(asset.fileCreatedAt).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+
+  // Groups by UTC month; the key is the first instant of that month (formatBucketTitle renders it)
+  private monthKeyOf(asset: AssetItem): string {
+    const d = new Date(asset.fileCreatedAt);
+    if (isNaN(d.getTime())) {
+      return '未知日期';
+    }
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
+  }
+
+  private rebuildCollectionBuckets(): void {
+    const list: TimeBucketItem[] = [];
+    for (const asset of this.collectionAssets) {
+      const key = this.monthKeyOf(asset);
+      const last: TimeBucketItem | undefined = list.length > 0 ? list[list.length - 1] : undefined;
+      let target: TimeBucketItem;
+      if (last !== undefined && last.timeBucket === key) {
+        target = last;
+      } else {
+        target = new TimeBucketItem(key, 0, []);
+        target.isLoaded = true;
+        list.push(target);
+      }
+      target.assets.push(asset);
+    }
+    for (const bucket of list) {
+      bucket.count = bucket.assets.length;
+    }
+    this.buckets = list;
+    this.updateFlattenedAssets();
+  }
+
   showToast(text: string): void {
     this.toastText = text;
     setTimeout(() => {
@@ -109,6 +223,9 @@ export struct TimelinePage {
    * Cold start: Load the newest bucket(s) first and scroll immediately to the bottom (Spec 2.4)
    */
   async loadTimeline(): Promise<void> {
+    if (this.isCollectionMode()) {
+      return this.loadCollection();
+    }
     if (this.isLoading) {
       return;
     }
@@ -152,6 +269,9 @@ export struct TimelinePage {
    * On-demand progressive loading for older history as user scrolls up
    */
   async loadOlderBuckets(): Promise<void> {
+    if (this.isCollectionMode()) {
+      return; // collections load all pages in the background
+    }
     if (this.coldStartAnchoring || this.isLoadingOlder || this.oldestLoadedBucketIdx <= 0 || this.buckets.length === 0) {
       return;
     }
@@ -223,6 +343,15 @@ export struct TimelinePage {
       }
     }
     this.allVisibleAssets = list;
+  }
+
+  /**
+   * Switching the source filter always lands on the newest photos at the bottom.
+   */
+  setSourceFilter(filter: SourceFilterType): void {
+    this.currentFilter = filter;
+    this.updateFlattenedAssets();
+    this.scrollToLatest();
   }
 
   /**
@@ -596,7 +725,15 @@ export struct TimelinePage {
         // Top Header
         Row() {
           if (!this.isSelectionMode) {
-            Text('照片')
+            if (this.isCollectionMode()) {
+              Button('返回')
+                .fontSize(14)
+                .fontColor('#409EFF')
+                .backgroundColor(Color.Transparent)
+                .padding({ left: 0, right: 8 })
+                .onClick(() => { this.onBack(); })
+            }
+            Text(this.isCollectionMode() ? this.collectionTitle : '照片')
               .fontSize(22)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.theme.textPrimary)
@@ -614,8 +751,7 @@ export struct TimelinePage {
                 .backgroundColor(this.currentFilter === 'ALL' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
-                  this.currentFilter = 'ALL';
-                  this.updateFlattenedAssets();
+                  this.setSourceFilter('ALL');
                 })
 
               Button('云端')
@@ -627,8 +763,7 @@ export struct TimelinePage {
                 .backgroundColor(this.currentFilter === 'CLOUD' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
-                  this.currentFilter = 'CLOUD';
-                  this.updateFlattenedAssets();
+                  this.setSourceFilter('CLOUD');
                 })
 
               Button('本机')
@@ -640,8 +775,7 @@ export struct TimelinePage {
                 .backgroundColor(this.currentFilter === 'LOCAL' ? '#409EFF' : Color.Transparent)
                 .borderRadius(13)
                 .onClick(() => {
-                  this.currentFilter = 'LOCAL';
-                  this.updateFlattenedAssets();
+                  this.setSourceFilter('LOCAL');
                 })
             }
             .backgroundColor(this.theme.segmentBg)
@@ -733,8 +867,9 @@ export struct TimelinePage {
           .justifyContent(FlexAlign.Center)
         } else if (!this.isLoading && (!this.hasAnyVisibleAssets() || this.buckets.length === 0)) {
           Column({ space: 12 }) {
-            Text(this.currentFilter === 'ALL' ? '时间线暂无照片' :
-              (this.currentFilter === 'CLOUD' ? '云端暂无照片' : '本机暂无照片'))
+            Text(this.isCollectionMode() ? `${this.collectionTitle}暂无内容` :
+              (this.currentFilter === 'ALL' ? '时间线暂无照片' :
+              (this.currentFilter === 'CLOUD' ? '云端暂无照片' : '本机暂无照片')))
               .fontSize(15)
               .fontColor('#A4A9B2')
             Button('刷新').onClick(() => { this.loadTimeline(); })

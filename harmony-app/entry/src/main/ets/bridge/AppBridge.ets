@@ -195,6 +195,14 @@ export class AppBridge {
     return { assets: [] };
   }
 
+  public static async fetchCollectionPage(kind: string, page: number = 1, cursor?: string): Promise<AlbumAssetPage> {
+    const api = ImmichApiService.getInstance();
+    if (api.currentServer.isConnected) {
+      return api.fetchCollectionPage(kind, page, cursor);
+    }
+    return { assets: [] };
+  }
+
   public static async toggleAlbumPin(albumId: string): Promise<boolean> {
     const api = ImmichApiService.getInstance();
     if (api.currentServer.isConnected) {

@@ -9,7 +9,7 @@ import { LibraryPage } from './LibraryPage';
 import { AssetViewerPage } from './AssetViewerPage';
 import { AccountSettingsDialog } from '../components/AccountSettingsDialog';
 import { AssetItem, AlbumItem } from '../models/AssetModels';
-import { ImmichApiService } from '../services/ImmichApiService';
+import { ImmichApiService, collectionTitle } from '../services/ImmichApiService';
 import { ThemeService } from '../services/ThemeService';
 
 @Entry
@@ -20,6 +20,8 @@ struct Index {
   @Local selectedAsset: AssetItem | null = null;
   @Local viewingAssetList: AssetItem[] = [];
   @Local selectedAlbum: AlbumItem | null = null;
+  // Library collection currently open (empty string = none)
+  @Local collectionKind: string = '';
   @Local isSettingsOpen: boolean = false;
   @Local scrollToLatestTrigger: number = 0;
   @Local theme: ThemeService = ThemeService.getInstance();
@@ -121,7 +123,7 @@ struct Index {
             TabContent() {
               LibraryPage({
                 onSelectItem: (cat: string) => {
-                  console.info('[Index] Selected library category:', cat);
+                  this.collectionKind = cat;
                 },
                 onClearThumbnailCache: () => {
                   ImmichApiService.getInstance().clearMediaCache();
@@ -153,6 +155,25 @@ struct Index {
           onSelectAsset: (asset: AssetItem, allAssets?: AssetItem[]) => {
             this.selectedAsset = asset;
             this.viewingAssetList = allAssets ?? [asset];
+          }
+        })
+      }
+
+      // Library collections (favorites, videos, live photos, archive, trash, recently added)
+      if (this.collectionKind !== '') {
+        TimelinePage({
+          collectionKind: this.collectionKind,
+          collectionTitle: collectionTitle(this.collectionKind),
+          mediaVersion: this.mediaVersion,
+          onBack: () => {
+            this.collectionKind = '';
+          },
+          onSelectAsset: (asset: AssetItem, allAssets?: AssetItem[]) => {
+            this.selectedAsset = asset;
+            this.viewingAssetList = allAssets ?? [asset];
+          },
+          onOpenSettings: () => {
+            this.isSettingsOpen = true;
           }
         })
       }

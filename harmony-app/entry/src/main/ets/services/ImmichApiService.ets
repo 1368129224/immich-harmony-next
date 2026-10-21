@@ -15,6 +15,56 @@ export interface ImmichServerInfo {
   isConnected: boolean;
 }
 
+/**
+ * Library collections backed by Immich metadata search. Screenshots and panoramas have no
+ * server-side filter, so they are intentionally not offered (see spec: "实际支持的类型").
+ */
+export type CollectionKind = 'favorites' | 'recently_added' | 'videos' | 'live_photos' | 'archive' | 'trash';
+
+interface CollectionFilter {
+  type?: string;
+  isFavorite?: boolean;
+  isMotion?: boolean;
+  isArchived?: boolean;
+  isTrashed?: boolean;
+}
+
+export function collectionTitle(kind: string): string {
+  switch (kind) {
+    case 'favorites':
+      return '收藏';
+    case 'recently_added':
+      return '最近添加';
+    case 'videos':
+      return '视频';
+    case 'live_photos':
+      return '实况照片';
+    case 'archive':
+      return '归档';
+    case 'trash':
+      return '回收站（Immich 云端）';
+    default:
+      return '';
+  }
+}
+
+function collectionFilter(kind: string): CollectionFilter {
+  switch (kind) {
+    case 'favorites':
+      return { isFavorite: true };
+    case 'videos':
+      return { type: 'VIDEO' };
+    case 'live_photos':
+      return { isMotion: true };
+    case 'archive':
+      return { isArchived: true };
+    case 'trash':
+      return { isTrashed: true };
+    default:
+      return {};
+  }
+}
+
 export class ImmichApiService {
   private static instance: ImmichApiService | null = null;
   private cacheDir: string = '';
@@ -628,6 +678,41 @@ export class ImmichApiService {
       assets.push(this.assetFromDto(row));
     }
     console.info(`[ImmichApi] Loaded ${assets.length} album photos`);
+    return { assets: assets, nextPage: result.nextPage, nextCursor: result.nextCursor };
+  }
+
+  /**
+   * Paged library collection (favorites, videos, live photos, archive, trash, recently added).
+   * Newest first from the server; the view re-sorts chronologically for display.
+   */
+  public async fetchCollectionPage(kind: string, page: number = 1, cursor?: string): Promise<AlbumAssetPage> {
+    if (!Number.isInteger(page) || page < 1) {
+      throw new Error('分类分页请求无效');
+    }
+    const body: Record<string, Object> = {};
+    const filter = collectionFilter(kind);
+    body['size'] = 200;
+    body['order'] = 'desc';
+    if (filter.type !== undefined) { body['type'] = filter.type; }
+    if (filter.isFavorite !== undefined) { body['isFavorite'] = filter.isFavorite; }
+    if (filter.isMotion !== undefined) { body['isMotion'] = filter.isMotion; }
+    if (filter.isArchived !== undefined) { body['isArchived'] = filter.isArchived; }
+    if (filter.isTrashed !== undefined) { body['isTrashed'] = filter.isTrashed; }
+    if (cursor) {
+      body['cursor'] = cursor;
+    } else {
+      body['page'] = page;
+    }
+    const result = parseAlbumAssetPage(await this.apiRequest('search/metadata', http.RequestMethod.POST, JSON.stringify(body)));
+    if ((result.nextPage !== undefined && result.nextPage <= page && !cursor) ||
+      (cursor !== undefined && result.nextCursor === cursor)) {
+      throw new Error('服务器分类分页没有前进');
+    }
+    const assets: AssetItem[] = [];
+    for (const row of result.items) {
+      assets.push(this.assetFromDto(row));
+    }
+    console.info(`[ImmichApi] Loaded ${assets.length} items for collection ${kind}`);
     return { assets: assets, nextPage: result.nextPage, nextCursor: result.nextCursor };
   }
 

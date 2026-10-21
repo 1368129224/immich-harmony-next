@@ -107,10 +107,6 @@ export struct LibraryPage {
             this.buildListItem($r('app.media.icon_video'), '视频', 'videos')
             Divider().color(this.theme.divider).margin({ left: 48 })
             this.buildListItem($r('app.media.icon_live_photo'), '实况照片', 'live_photos')
-            Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_panorama'), '全景照片', 'panoramas')
-            Divider().color(this.theme.divider).margin({ left: 48 })
-            this.buildListItem($r('app.media.icon_phone'), '截图', 'screenshots')
           }
           .borderRadius(12)
           .clip(true)
