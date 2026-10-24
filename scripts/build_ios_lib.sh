@@ -42,6 +42,19 @@ echo "[OK] Synchronized C header to: ${HEADER_DEST}"
 BUILD_MODE_RAW="${1:-release}"
 BUILD_MODE="$(echo "$BUILD_MODE_RAW" | tr '[:upper:]' '[:lower:]')"
 
+# Fast skip check: if output library already exists and is newer than all rust sources
+DEVICE_TARGET_LIB="${OUTPUT_DIR}/libimmich_ios_ffi.a"
+if [ "${FORCE_RUST_BUILD:-0}" != "1" ] && [ -f "${DEVICE_TARGET_LIB}" ]; then
+    NEWER_SOURCE=$(find "${CRATE_DIR}" "${REPO_ROOT}/crates" "${REPO_ROOT}/Cargo.toml" "${REPO_ROOT}/Cargo.lock" -newer "${DEVICE_TARGET_LIB}" -type f 2>/dev/null | head -n 1 || true)
+    if [ -z "${NEWER_SOURCE}" ]; then
+        echo "[SKIP] Rust source code unchanged. Reusing existing libimmich_ios_ffi.a."
+        echo "===================================================================="
+        exit 0
+    else
+        echo "--> Detected changed file: ${NEWER_SOURCE}"
+    fi
+fi
+
 CARGO_FLAGS=()
 if [ "$BUILD_MODE" = "release" ]; then
     CARGO_FLAGS+=(--release)
