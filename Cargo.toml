@@ -2,6 +2,7 @@
 members = [
     "crates/immich-core",
     "crates/immich-ohos-napi",
+    "crates/immich-ios-ffi",
 ]
-default-members = ["crates/immich-core"]
+default-members = ["crates/immich-core", "crates/immich-ios-ffi"]
 resolver = "2"

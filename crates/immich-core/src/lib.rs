@@ -119,6 +119,18 @@ impl ImmichCore {
         Ok(buckets)
     }
 
+    /// Retrieve locally cached buckets directly without making a network request.
+    pub fn get_cached_buckets(&self) -> Result<Vec<BucketInfo>, CoreError> {
+        let cached = self.db.get_buckets()?;
+        Ok(cached)
+    }
+
+    /// Retrieve locally cached assets for a bucket directly without making a network request.
+    pub fn get_cached_bucket_assets(&self, time_bucket: &str) -> Result<Vec<Asset>, CoreError> {
+        let cached = self.db.get_assets_by_bucket(time_bucket)?;
+        Ok(cached)
+    }
+
     pub async fn fetch_bucket_assets(&self, time_bucket: &str) -> Result<Vec<Asset>, CoreError> {
         let assets = {
             let client = self.client.read().await;

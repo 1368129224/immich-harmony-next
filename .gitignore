@@ -14,6 +14,10 @@ oh_modules/
 .cxx/
 local.properties
 
+# Python
+__pycache__/
+*.pyc
+
 # Operating system files
 .DS_Store
 Thumbs.db
@@ -22,5 +26,7 @@ Thumbs.db
 *.so
 *.dll
 *.dylib
+*.a
 !harmony-app/entry/libs/**/*.so
 !harmony-app/entry/libs/**/.gitkeep
+!ios-app/Runner/libs/**/.gitkeep
