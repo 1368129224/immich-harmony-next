@@ -373,7 +373,7 @@ public final class ImmichCoreBridge: @unchecked Sendable {
     }
 
     return try await Task.detached { [self] in
-      let exif: CoreExifInfo? = try invokeFfi {
+      let exif: CoreExifInfo? = try invokeFfiOptional {
         assetId.withCString { idCStr in
           c_immich_ios_get_asset_exif(idCStr)
         }
@@ -411,11 +411,38 @@ public final class ImmichCoreBridge: @unchecked Sendable {
         return val
       } else if T.self == Bool.self, let b = true as? T {
         return b
-      } else if let empty = Optional<T>.none as? T {
-        return empty
       } else {
         throw ImmichCoreBridgeError.ffiError("FFI returned success with missing data payload")
       }
+    } else {
+      throw ImmichCoreBridgeError.ffiError(envelope.error ?? "Unknown Rust core error")
+    }
+  }
+
+  private func invokeFfiOptional<T: Decodable>(_ block: () -> UnsafeMutablePointer<CChar>?) throws -> T? {
+    let ptr = block()
+    guard let cStr = ptr else {
+      throw ImmichCoreBridgeError.ffiError("FFI returned NULL pointer")
+    }
+    defer { c_immich_ios_free_string(cStr) }
+
+    guard let str = String(validatingUTF8: cStr) else {
+      throw ImmichCoreBridgeError.invalidUTF8
+    }
+
+    guard let data = str.data(using: .utf8) else {
+      throw ImmichCoreBridgeError.invalidUTF8
+    }
+
+    let envelope: CoreFfiEnvelope<T>
+    do {
+      envelope = try decoder.decode(CoreFfiEnvelope<T>.self, from: data)
+    } catch {
+      throw ImmichCoreBridgeError.jsonDecodeError("Failed to decode JSON: \(str). Error: \(error)")
+    }
+
+    if envelope.success {
+      return envelope.data
     } else {
       throw ImmichCoreBridgeError.ffiError(envelope.error ?? "Unknown Rust core error")
     }
@@ -425,7 +452,7 @@ public final class ImmichCoreBridge: @unchecked Sendable {
 // MARK: - Extension to Convert to NativeAsset
 
 extension CoreAsset {
-  public func toNativeAsset() -> NativeAsset {
+  func toNativeAsset() -> NativeAsset {
     let date = NativeImmichClient.parseISODate(fileCreatedAt) ?? .distantPast
     return NativeAsset(
       id: id,
