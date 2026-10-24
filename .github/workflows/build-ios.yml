@@ -98,7 +98,7 @@ jobs:
                   'commit': os.environ['COMMIT_HASH'],
                   'sha256': os.environ['IPA_SHA256'],
                   'downloadURL': (
-                      'https://github.com/1368129224/immich-h/releases/'
+                      'https://github.com/1368129224/immich-next/releases/'
                       'download/latest-build/Immich-unsigned.ipa'
                   ),
               }, f, indent=2)
