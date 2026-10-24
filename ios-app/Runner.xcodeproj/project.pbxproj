@@ -317,6 +317,10 @@
 					"$(PROJECT_DIR)/Runner/libs",
 				);
 				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-limmich_ios_ffi",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.immichz.immichz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -505,6 +509,10 @@
 					"$(PROJECT_DIR)/Runner/libs",
 				);
 				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-limmich_ios_ffi",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.immichz.immichz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -536,6 +544,10 @@
 					"$(PROJECT_DIR)/Runner/libs",
 				);
 				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-limmich_ios_ffi",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.immichz.immichz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";

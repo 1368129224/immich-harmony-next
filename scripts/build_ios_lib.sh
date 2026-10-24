@@ -62,8 +62,8 @@ if [ "$OS_NAME" = "Darwin" ]; then
     DEVICE_ARM="${REPO_ROOT}/target/aarch64-apple-ios/${BUILD_MODE}/libimmich_ios_ffi.a"
 
     if [ -f "${DEVICE_ARM}" ]; then
-        cp -f "${DEVICE_ARM}" "${OUTPUT_DIR}/libimmich_ios_ffi_device.a"
-        echo "[OK] Installed iOS device static library."
+        cp -f "${DEVICE_ARM}" "${OUTPUT_DIR}/libimmich_ios_ffi.a"
+        echo "[OK] Installed iOS device static library to ${OUTPUT_DIR}/libimmich_ios_ffi.a"
     fi
 
     if [ -f "${SIM_ARM}" ] && [ -f "${SIM_X64}" ]; then
