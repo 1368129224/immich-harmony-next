@@ -2878,8 +2878,9 @@ private struct NativeAlbumsView: View {
 
   var body: some View {
     NavigationView {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
+      Group {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 16) {
           if let active = activeEntry {
             NavigationLink(
               destination: NativeAlbumDetail(client: client, device: device, entry: active, mergeAlbums: mergeAlbums),
@@ -2967,8 +2968,12 @@ private struct NativeAlbumsView: View {
           .padding(.horizontal, 16)
           .padding(.top, 8)
           .padding(.bottom, 24)
+          }
         }
       }
+      // Scroll/gesture modifiers live on a wrapper ABOVE the ScrollView so the
+      // drag-selection gesture chain never competes with the scroll view's pan
+      // recognizer (same layout as NativeResultGrid, which scrolls correctly).
       .coordinateSpace(name: "albumsScrollSpace")
       .nativeScrollDisabled(isDragSelecting)
       .onPreferenceChange(NativeItemFramePreferenceKey.self) { frames in
@@ -2976,7 +2981,7 @@ private struct NativeAlbumsView: View {
       }
       .simultaneousGesture(
         LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
-          .sequenced(before: DragGesture(coordinateSpace: .named("albumsScrollSpace")))
+          .sequenced(before: DragGesture(minimumDistance: 10, coordinateSpace: .named("albumsScrollSpace")))
           .onChanged { value in
             switch value {
             case .first:
