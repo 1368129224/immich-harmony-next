@@ -1463,7 +1463,21 @@ struct NativePhotosView: View {
 
   @ViewBuilder
   private var trailingToolbarContent: some View {
-    HStack(spacing: 2) {
+    HStack(spacing: 6) {
+      if isSelecting {
+        Button(selectedIDs.count >= allOrderedAssetIDs.count && !allOrderedAssetIDs.isEmpty ? "取消全选" : "全选") {
+          toggleSelectAll()
+        }
+        .font(.system(size: 15, weight: .medium))
+      } else {
+        Button("选择") {
+          isSelecting = true
+          UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        .font(.system(size: 15, weight: .medium))
+        .disabled(!isInitialTimelineVisible || totalDisplayCount == 0)
+      }
+
       // 服务器状态按钮
       Button {
         showServerSettings = true
@@ -2194,13 +2208,7 @@ struct NativePhotosView: View {
             if isSelecting {
               Text("已选 \(selectedIDs.count) 项").font(.headline)
             } else {
-              Picker("照片来源", selection: $sourceFilter) {
-                ForEach(NativePhotosSource.allCases) { source in Text(source.rawValue).tag(source) }
-              }
-              .pickerStyle(.segmented)
-              // Leave room for both server and sync buttons on narrow iPhones.
-              .frame(width: min(142, UIScreen.main.bounds.width * 0.34), height: 32)
-              .accessibilityLabel("照片来源")
+              Text("照片").font(.headline)
             }
           }
           ToolbarItem(placement: .navigationBarTrailing) {
