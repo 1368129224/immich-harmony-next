@@ -2698,11 +2698,23 @@ private struct NativeAlbumCard: View {
   let mergeAlbums: Bool
   let isSelecting: Bool
   let isSelected: Bool
+  let isPinned: Bool
+  let onTogglePin: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       ZStack(alignment: .topTrailing) {
         NativeAlbumCoverView(client: client, device: device, entry: entry, mergeAlbums: mergeAlbums)
+        if isPinned {
+          Image(systemName: "pin.fill")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(.white)
+            .padding(5)
+            .background(Color.orange.opacity(0.85))
+            .clipShape(Circle())
+            .padding(6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
         if isSelecting {
           ZStack {
             Circle()
@@ -2734,6 +2746,13 @@ private struct NativeAlbumCard: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .contextMenu {
+      Button {
+        onTogglePin()
+      } label: {
+        Label(isPinned ? "取消置顶" : "置顶相册", systemImage: isPinned ? "pin.slash" : "pin")
+      }
+    }
   }
 }
 
@@ -2741,6 +2760,7 @@ private struct NativeAlbumsView: View {
   let client: NativeImmichClient
   @ObservedObject var device: NativeDeviceLibrary
   @AppStorage("immichz_merge_albums") private var mergeAlbums = true
+  @AppStorage("immichz_pinned_album_keys") private var pinnedAlbumKeysData: String = "[]"
   @State private var serverAlbums: [NativeServerAlbum] = []
   @State private var error: String?
   @State private var loaded = false
@@ -2769,6 +2789,66 @@ private struct NativeAlbumsView: View {
     GridItem(.flexible(), spacing: 14),
     GridItem(.flexible(), spacing: 14)
   ]
+
+  private var pinnedKeys: [String] {
+    get {
+      guard let data = pinnedAlbumKeysData.data(using: .utf8),
+            let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+      return arr
+    }
+  }
+
+  private func togglePin(for entry: NativeAlbumEntry) {
+    let key = entry.title.trimmingCharacters(in: .whitespaces).folding(options: .caseInsensitive, locale: .current)
+    var current = pinnedKeys
+    if let idx = current.firstIndex(of: key) {
+      current.remove(at: idx)
+    } else {
+      current.append(key)
+    }
+    if let data = try? JSONEncoder().encode(current), let str = String(data: data, encoding: .utf8) {
+      pinnedAlbumKeysData = str
+    }
+  }
+
+  private func isEntryPinned(_ entry: NativeAlbumEntry) -> Bool {
+    let key = entry.title.trimmingCharacters(in: .whitespaces).folding(options: .caseInsensitive, locale: .current)
+    return pinnedKeys.contains(key)
+  }
+
+  private var sortedEntries: [NativeAlbumEntry] {
+    let raw = entries
+    let pinnedSet = Set(pinnedKeys)
+
+    // Partition into pinned and regular
+    var pinnedList: [NativeAlbumEntry] = []
+    var regularList: [NativeAlbumEntry] = []
+
+    for item in raw {
+      let key = item.title.trimmingCharacters(in: .whitespaces).folding(options: .caseInsensitive, locale: .current)
+      if pinnedSet.contains(key) {
+        pinnedList.append(item)
+      } else {
+        regularList.append(item)
+      }
+    }
+
+    // Pinned preserves order of pinnedKeys
+    pinnedList.sort { a, b in
+      let kA = a.title.trimmingCharacters(in: .whitespaces).folding(options: .caseInsensitive, locale: .current)
+      let kB = b.title.trimmingCharacters(in: .whitespaces).folding(options: .caseInsensitive, locale: .current)
+      let idxA = pinnedKeys.firstIndex(of: kA) ?? 0
+      let idxB = pinnedKeys.firstIndex(of: kB) ?? 0
+      return idxA < idxB
+    }
+
+    // Regular sorted alphabetically / pinyin
+    regularList.sort {
+      $0.title.localizedStandardCompare($1.title) == .orderedAscending
+    }
+
+    return pinnedList + regularList
+  }
 
   private var entries: [NativeAlbumEntry] {
     if mergeAlbums {
@@ -2827,14 +2907,16 @@ private struct NativeAlbumsView: View {
           }
 
           LazyVGrid(columns: gridColumns, spacing: 16) {
-            ForEach(entries) { entry in
+            ForEach(sortedEntries) { entry in
               NativeAlbumCard(
                 client: client,
                 device: device,
                 entry: entry,
                 mergeAlbums: mergeAlbums,
                 isSelecting: isSelecting,
-                isSelected: selectedAlbumIDs.contains(entry.id)
+                isSelected: selectedAlbumIDs.contains(entry.id),
+                isPinned: isEntryPinned(entry),
+                onTogglePin: { togglePin(for: entry) }
               )
               .background(
                 GeometryReader { geo in

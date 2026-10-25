@@ -21,21 +21,25 @@ private func nativeData(for request: URLRequest, using session: URLSession = .sh
 
 // MARK: - Native session and API
 
-struct NativeServerConfig: Codable {
+struct NativeServerConfig: Codable, Identifiable, Equatable {
+  var id: String { "\(serverUrl)|\(userId ?? credential ?? "default")" }
   var serverUrl: String
   var apiEndpoint: String?
   var accessToken: String?
   var apiKey: String?
   var deviceId: String?
   var userId: String? = nil
+  var userEmail: String? = nil
+  var userName: String? = nil
 
   var credential: String? { accessToken ?? apiKey }
 }
 
-private enum NativeSessionStore {
+enum NativeSessionStore {
   private static let service = "com.immichz.session"
   private static let account = "immich.server_config"
   private static let fallbackKey = "immichz.session.fallback"
+  private static let allAccountsKey = "immichz.saved_accounts_list"
 
   static func read() -> NativeServerConfig? {
     let query: [String: Any] = [
@@ -81,8 +85,42 @@ private enum NativeSessionStore {
     if writeStatus == errSecSuccess {
       UserDefaults.standard.removeObject(forKey: fallbackKey)
     } else {
-      // Keep unsigned builds usable when Keychain access is unavailable.
       UserDefaults.standard.set(String(data: data, encoding: .utf8), forKey: fallbackKey)
+    }
+
+    // Also persist into saved accounts list
+    saveToHistory(config)
+  }
+
+  static func savedAccounts() -> [NativeServerConfig] {
+    guard let data = UserDefaults.standard.data(forKey: allAccountsKey),
+          let list = try? JSONDecoder().decode([NativeServerConfig].self, from: data) else {
+      if let current = read() { return [current] }
+      return []
+    }
+    return list
+  }
+
+  static func saveToHistory(_ config: NativeServerConfig) {
+    var list = savedAccounts()
+    if let idx = list.firstIndex(where: { $0.id == config.id || ($0.serverUrl == config.serverUrl && $0.userId == config.userId) }) {
+      list[idx] = config
+    } else {
+      list.append(config)
+    }
+    if let data = try? JSONEncoder().encode(list) {
+      UserDefaults.standard.set(data, forKey: allAccountsKey)
+    }
+  }
+
+  static func removeAccount(id: String) {
+    var list = savedAccounts()
+    list.removeAll { $0.id == id }
+    if let data = try? JSONEncoder().encode(list) {
+      UserDefaults.standard.set(data, forKey: allAccountsKey)
+    }
+    if let current = read(), current.id == id {
+      clear()
     }
   }
 }
@@ -850,6 +888,33 @@ private struct NativeLoginView: View {
   var body: some View {
     NavigationView {
       Form {
+        let history = NativeSessionStore.savedAccounts()
+        if !history.isEmpty {
+          Section(header: Text("已保存的服务器与账号")) {
+            ForEach(history) { item in
+              Button {
+                server = item.serverUrl
+                if let key = item.apiKey {
+                  useAPIKey = true
+                  apiKey = key
+                } else if let emailVal = item.userEmail {
+                  useAPIKey = false
+                  email = emailVal
+                }
+              } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(item.userEmail ?? (item.apiKey != nil ? "API Key 授权" : item.serverUrl))
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                  Text(item.serverUrl)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+              }
+            }
+          }
+        }
+
         Section {
           TextField("https://immich.example.com", text: $server)
             .textInputAutocapitalization(.never)
@@ -3723,6 +3788,8 @@ struct NativeUnifiedGalleryViewer: View {
   @State private var showDeleteConfirmationDialog = false
   @State private var isDeletingItem = false
   @State private var deleteErrorMessage: String? = nil
+  @State private var showShareOptionsDialog = false
+  @State private var isSavingToDevice = false
 
   init(
     client: NativeImmichClient,
@@ -3829,6 +3896,22 @@ struct NativeUnifiedGalleryViewer: View {
       Button("取消", role: .cancel) {}
     } message: {
       Text("确定要彻底删除该照片吗？")
+    }
+    .confirmationDialog("分享选项", isPresented: $showShareOptionsDialog, titleVisibility: .visible) {
+      Button("分享原件（保留位置信息）") {
+        executeShare(removeGPS: false, cloudLinkOnly: false)
+      }
+      Button("分享安全副本（去除 GPS 定位）") {
+        executeShare(removeGPS: true, cloudLinkOnly: false)
+      }
+      if let server = currentItem?.server {
+        Button("复制云端访问链接") {
+          executeShare(removeGPS: false, cloudLinkOnly: true)
+        }
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("请选择分享格式。去除 GPS 定位后将生成无敏感地理坐标的脱敏副本。")
     }
     .alert("删除失败", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
       Button("确定", role: .cancel) { deleteErrorMessage = nil }
@@ -3957,10 +4040,22 @@ struct NativeUnifiedGalleryViewer: View {
             viewerActionButton(
               title: isPreparingShare ? "准备中" : "分享",
               disabled: isPreparingShare,
-              action: triggerShare
+              action: { showShareOptionsDialog = true }
             ) {
               if isPreparingShare { ProgressView().tint(.white) }
               else { Image(systemName: "square.and.arrow.up").font(.system(size: 19)) }
+            }
+
+            // Save to Device Photo Library (if only on server or needs local save)
+            if currentItem?.server != nil && currentItem?.local == nil {
+              viewerActionButton(
+                title: isSavingToDevice ? "保存中" : "存到相册",
+                disabled: isSavingToDevice,
+                action: { Task { await saveCurrentServerAssetToDevice() } }
+              ) {
+                if isSavingToDevice { ProgressView().tint(.white) }
+                else { Image(systemName: "arrow.down.to.line").font(.system(size: 19)) }
+              }
             }
 
             // Favorite
@@ -4151,8 +4246,17 @@ struct NativeUnifiedGalleryViewer: View {
     }
   }
 
-  private func triggerShare() {
+  private func executeShare(removeGPS: Bool, cloudLinkOnly: Bool) {
     guard let item = currentItem, !isPreparingShare else { return }
+    if cloudLinkOnly, let server = item.server {
+      // Create or format cloud link
+      let base = client.config.apiEndpoint ?? (NativeImmichClient.normalize(client.config.serverUrl) + "/api")
+      let shareUrl = "\(client.config.serverUrl)/photos/\(server.id)"
+      UIPasteboard.general.string = shareUrl
+      viewerMessage = "云端照片链接已复制到剪贴板：\n\(shareUrl)"
+      return
+    }
+
     isPreparingShare = true
     let preparationID = UUID()
     sharePreparationID = preparationID
@@ -4163,8 +4267,6 @@ struct NativeUnifiedGalleryViewer: View {
         if Task.isCancelled || sharePreparationID != preparationID {
           if let preparedURL { try? FileManager.default.removeItem(at: preparedURL) }
         }
-        // A cancelled preparation may finish after the user starts another.
-        // Only the currently active task may reset the spinner or task handle.
         if sharePreparationID == preparationID {
           sharePreparationID = nil
           isPreparingShare = false
@@ -4172,27 +4274,61 @@ struct NativeUnifiedGalleryViewer: View {
         }
       }
       do {
-        let shared: Any
+        var fileURL: URL
         if let local = item.local {
           guard let source = PHAsset.fetchAssets(withLocalIdentifiers: [local.id], options: nil).firstObject else {
             throw NativeShareError.originalUnavailable
           }
-          let result = try await nativeOriginalFile(for: source)
-          preparedURL = result
-          shared = result
+          fileURL = try await nativeOriginalFile(for: source)
         } else if let server = item.server {
-          let result = try await client.originalFile(for: server)
-          preparedURL = result
-          shared = result
+          fileURL = try await client.originalFile(for: server)
         } else {
           throw NativeShareError.originalUnavailable
         }
+
+        // Apply GPS stripping if requested
+        if removeGPS {
+          fileURL = (try? nativeStripGPSFromImageFile(at: fileURL)) ?? fileURL
+        }
+
+        preparedURL = fileURL
         guard !Task.isCancelled, sharePreparationID == preparationID else { return }
-        shareItem = shared
+        shareItem = fileURL
       } catch {
         guard !Task.isCancelled, sharePreparationID == preparationID else { return }
         viewerMessage = "原件暂不可分享。请检查网络、照片权限或 iCloud 原件状态后重试。\n\(error.localizedDescription)"
       }
+    }
+  }
+
+  private func saveCurrentServerAssetToDevice() async {
+    guard let item = currentItem, let server = item.server, !isSavingToDevice else { return }
+    if !device.authorized {
+      await device.requestAccess()
+      guard device.authorized else {
+        viewerMessage = "未获得系统照片写入权限，请在系统设置中允许访问。"
+        return
+      }
+    }
+
+    isSavingToDevice = true
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    defer { isSavingToDevice = false }
+
+    do {
+      let fileURL = try await client.originalFile(for: server)
+      let saveRes = await device.saveFilesToPhotos([fileURL])
+      try? FileManager.default.removeItem(at: fileURL)
+
+      if saveRes.saved > 0 {
+        viewerMessage = "原图已成功保存到系统照片！"
+        // Refresh device and update match in cache
+        device.refresh()
+      } else {
+        viewerMessage = "保存到系统照片失败，请检查手机存储空间。"
+      }
+    } catch {
+      viewerMessage = "下载原件失败：\(error.localizedDescription)"
     }
   }
 }
@@ -4259,6 +4395,45 @@ struct NativeActivityView: UIViewControllerRepresentable {
 struct NativeBatchShareResult {
   let files: [Any]
   let failed: Int
+}
+
+/// Helper function to strip GPS coordinates from an image file (JPEG/HEIC/PNG)
+/// Creates a sanitized copy in temporaryDirectory without GPS metadata
+func nativeStripGPSFromImageFile(at sourceURL: URL) throws -> URL {
+  guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
+    return sourceURL
+  }
+  guard let uti = CGImageSourceGetType(source) else {
+    return sourceURL
+  }
+
+  let ext = sourceURL.pathExtension
+  let sanitizedFilename = "\(UUID().uuidString)_nogps.\(ext)"
+  let destinationURL = FileManager.default.temporaryDirectory.appendingPathComponent(sanitizedFilename)
+
+  guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, uti, 1, nil) else {
+    return sourceURL
+  }
+
+  // Read metadata dict
+  let count = CGImageSourceGetCount(source)
+  if count > 0 {
+    if let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+      var sanitized = metadata
+      // Remove GPS Dictionary
+      sanitized.removeValue(forKey: kCGImagePropertyGPSDictionary)
+      CGImageDestinationAddImageFromSource(destination, source, 0, sanitized as CFDictionary)
+    } else {
+      CGImageDestinationAddImageFromSource(destination, source, 0, nil)
+    }
+  }
+
+  if CGImageDestinationFinalize(destination) {
+    return destinationURL
+  } else {
+    try? FileManager.default.removeItem(at: destinationURL)
+    return sourceURL
+  }
 }
 
 @MainActor
@@ -5279,6 +5454,63 @@ struct NativeServerSettingsSheet: View {
             }
           }
           .disabled(isTestingConnection)
+        }
+
+        Section(header: Text("多账号管理与切换")) {
+          let accounts = NativeSessionStore.savedAccounts()
+          ForEach(accounts) { acc in
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(acc.userEmail ?? (acc.apiKey != nil ? "API Key 账号" : acc.serverUrl))
+                  .font(.subheadline)
+                  .fontWeight(acc.id == client.config.id ? .semibold : .regular)
+                Text(acc.serverUrl)
+                  .font(.caption2)
+                  .foregroundColor(.secondary)
+              }
+              Spacer()
+              if acc.id == client.config.id {
+                Text("当前活跃")
+                  .font(.caption2)
+                  .padding(.horizontal, 6)
+                  .padding(.vertical, 2)
+                  .background(Color.green.opacity(0.15))
+                  .foregroundColor(.green)
+                  .cornerRadius(4)
+              } else {
+                Button("切换") {
+                  Task {
+                    dismiss()
+                    try? NativeSessionStore.save(acc)
+                    onLogout() // triggers reload with new session
+                  }
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+              }
+            }
+          }
+        }
+
+        Section(header: Text("缓存空间与隔离")) {
+          let identity = NativeSyncCacheStore.shared.identity ?? "default"
+          HStack {
+            Text("当前账号独立缓存")
+            Spacer()
+            Text(identity)
+              .font(.caption.monospaced())
+              .foregroundColor(.secondary)
+          }
+
+          Button(role: .destructive) {
+            NativePhotoSnapshotStore.shared.clearCurrentAccount()
+            NativeSyncCacheStore.shared.clear()
+            Task {
+              await NativeThumbnailDiskCache.shared.clearAll()
+            }
+          } label: {
+            Text("清理当前账号缩略图与元数据缓存")
+          }
         }
 
         Section(header: Text("账号操作")) {
