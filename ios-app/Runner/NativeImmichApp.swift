@@ -1250,10 +1250,7 @@ struct NativePhotosView: View {
   @State private var loadingOlderAnchor: String?
   @State private var showServerSettings = false
   @State private var showSyncSettings = false
-  @AppStorage("immichz_confirm_remote_only_deletion") private var confirmRemoteOnlyDeletion = true
   @State private var showDeleteConfirmation = false
-  @State private var showRemoteOnlyDeleteConfirmation = false
-  @State private var pendingRemoteOnlyDeleteItems: [NativeGridItem] = []
   @State private var deletionError: String?
   @State private var isDeleting = false
   @State private var batchShareItems: [Any]? = nil
@@ -2280,27 +2277,18 @@ struct NativePhotosView: View {
           Button("取消", role: .cancel) {}
         } message: { Text("本机资产和云端资产分别操作，不会自动上传。") }
         .confirmationDialog("删除选中的 \(selectedIDs.count) 项照片", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-          if selectionSpansBothSources {
-            Button("删除所有所选副本", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all, proxy: proxy) } }
+          Button("从所有位置删除", role: .destructive) {
+            Task { await deleteSelectedPhotos(scope: .all, proxy: proxy) }
           }
-          if selectedItems.contains(where: { $0.local != nil }) {
-            Button("仅删除本机副本", role: .destructive) { Task { await deleteSelectedPhotos(scope: .localOnly, proxy: proxy) } }
-          }
-          if selectedItems.contains(where: { $0.server != nil }) {
-            Button("仅删除云端副本", role: .destructive) { requestRemoteOnlyDeletion() }
+          if selectedItems.contains(where: { $0.local != nil && $0.server == nil }) {
+            Button("仅删除本机未上传照片", role: .destructive) {
+              Task { await deleteSelectedPhotos(scope: .localOnly, proxy: proxy) }
+            }
           }
           Button("取消", role: .cancel) {}
         } message: {
-          Text("所选内容中本机 \(nativePhotosSelectionActionAvailability(selectedItems).local) 项、云端 \(nativePhotosSelectionActionAvailability(selectedItems).server) 项；不在指定来源的项目将跳过。仅删除云端而保留本机时，若自动备份开启，照片可能再次上传。请明确选择删除范围；本机删除也可能同步至 iCloud 设备。")
+          Text("将从云端服务器及本地设备相册中彻底删除所选照片。")
         }
-        .alert("确认仅删除云端照片或视频", isPresented: $showRemoteOnlyDeleteConfirmation) {
-          Button("取消", role: .cancel) { pendingRemoteOnlyDeleteItems = [] }
-          Button("仅删除云端", role: .destructive) {
-            let items = pendingRemoteOnlyDeleteItems
-            pendingRemoteOnlyDeleteItems = []
-            Task { await performSelectedDeletion(items: items, scope: .remoteOnly, proxy: proxy) }
-          }
-        } message: { Text("将删除所选的 \(pendingRemoteOnlyDeleteItems.count) 项云端副本；本机副本会保留。若开启自动备份，照片可能再次上传。") }
         .alert("保存到本机照片", isPresented: $showSaveConfirmation) {
           Button("取消", role: .cancel) {}
           Button("继续保存") { Task { await saveSelectedToDevice() } }
@@ -2340,21 +2328,9 @@ struct NativePhotosView: View {
             onDeleteItem: { deletedItem, scope in
               let previousAssetIDs = cachedDayGroups.flatMap(\.assets).map(\.id)
               let fallbackID = nativeViewerNextSelectionID(deletingID: deletedItem.id, orderedIDs: previousAssetIDs)
-              if scope == .all || scope == .remoteOnly {
-                if let sid = deletedItem.server?.id { model.removeAssets(ids: [sid]) }
-              }
-              if let local = deletedItem.local,
-                 scope != .remoteOnly || cloud.matchedServerIDs[local.id] == deletedItem.server?.id {
+              if let sid = deletedItem.server?.id { model.removeAssets(ids: [sid]) }
+              if let local = deletedItem.local {
                 cloud.forgetMatches(localIDs: Set([local.id]))
-                if scope == .remoteOnly {
-                  Task {
-                    try? await ImmichCoreBridge.shared.addUploadTombstone(
-                      localAssetId: local.id,
-                      accountId: NativeSyncCacheStore.shared.identity ?? "default",
-                      reason: "deleted_from_cloud"
-                    )
-                  }
-                }
               }
               userMovedTimeline = true
               device.refresh()
@@ -2364,15 +2340,7 @@ struct NativePhotosView: View {
                   proxy.scrollTo(fallbackID, anchor: .center)
                 }
               }
-              // Removing one copy must not replace/dismiss the presented viewer.
-              // It updates its own current page to the surviving server/local copy.
-              guard scope == .all || (scope == .localOnly && deletedItem.server == nil) || (scope == .remoteOnly && deletedItem.local == nil) else { return }
-              if let fallbackID,
-                 let fallbackItem = cachedDayGroups.flatMap(\.assets).first(where: { $0.id == fallbackID }) {
-                activeViewerItem = fallbackItem
-              } else {
-                activeViewerItem = nil
-              }
+              activeViewerItem = nil
             },
             onServerAssetUpdated: { model.upsert($0) },
             onServerAssetArchived: { model.removeAssets(ids: [$0]) },
@@ -2504,18 +2472,6 @@ struct NativePhotosView: View {
     selectedItems.contains(where: { $0.local != nil }) && selectedItems.contains(where: { $0.server != nil })
   }
 
-  private func requestRemoteOnlyDeletion() {
-    guard !isDeleting else { return }
-    let items = selectedItems.filter { $0.server != nil }
-    guard !items.isEmpty else { return }
-    if confirmRemoteOnlyDeletion {
-      pendingRemoteOnlyDeleteItems = items
-      showRemoteOnlyDeleteConfirmation = true
-    } else {
-      Task { await performSelectedDeletion(items: items, scope: .remoteOnly) }
-    }
-  }
-
   private func deleteSelectedPhotos(scope: NativeDeleteTargetScope = .all, proxy: ScrollViewProxy? = nil) async {
     guard !isDeleting else { return }
     let items = selectedItems
@@ -2537,25 +2493,15 @@ struct NativePhotosView: View {
 
     do {
       try await nativeDeleteGridItems(items, scope: scope, client: client, device: device)
-      if scope == .all || scope == .remoteOnly {
-        let serverIDs = Set(items.compactMap { $0.server?.id })
-        model.removeAssets(ids: serverIDs)
-        var invalidatedLocalIDs = Set<String>()
-        for item in items {
-          guard let local = item.local,
-                let serverID = cloud.matchedServerIDs[local.id], serverIDs.contains(serverID) else { continue }
-          invalidatedLocalIDs.insert(local.id)
-          // Add tombstone to prevent re-uploading cloud-deleted asset if user keeps local copy
-          Task {
-            try? await ImmichCoreBridge.shared.addUploadTombstone(
-              localAssetId: local.id,
-              accountId: NativeSyncCacheStore.shared.identity ?? "default",
-              reason: "deleted_from_cloud"
-            )
-          }
-        }
-        cloud.forgetMatches(localIDs: invalidatedLocalIDs)
+      let serverIDs = Set(items.compactMap { $0.server?.id })
+      model.removeAssets(ids: serverIDs)
+      var invalidatedLocalIDs = Set<String>()
+      for item in items {
+        guard let local = item.local else { continue }
+        invalidatedLocalIDs.insert(local.id)
       }
+      cloud.forgetMatches(localIDs: invalidatedLocalIDs)
+
       selectedIDs.removeAll()
       isSelecting = false
       userMovedTimeline = true
@@ -3774,10 +3720,7 @@ struct NativeUnifiedGalleryViewer: View {
   @State private var viewerMessage: String?
   @State private var presentedController = NativeWeakControllerBox()
   @State private var shareItem: Any? = nil
-  @AppStorage("immichz_confirm_remote_only_deletion") private var confirmRemoteOnlyDeletion = true
-  @State private var showDeleteScopeDialog = false
-  @State private var showViewerRemoteDeleteConfirmation = false
-  @State private var pendingViewerRemoteDeleteItem: NativeGridItem?
+  @State private var showDeleteConfirmationDialog = false
   @State private var isDeletingItem = false
   @State private var deleteErrorMessage: String? = nil
 
@@ -3874,32 +3817,19 @@ struct NativeUnifiedGalleryViewer: View {
     .onChange(of: showChrome) { _ in
       presentedController.value?.setNeedsStatusBarAppearanceUpdate()
     }
-    .confirmationDialog("删除范围", isPresented: $showDeleteScopeDialog, titleVisibility: .visible) {
-      if currentItem?.local != nil {
-        Button("仅删除本地", role: .destructive) {
+    .confirmationDialog("删除照片", isPresented: $showDeleteConfirmationDialog, titleVisibility: .visible) {
+      Button("从所有位置删除", role: .destructive) {
+        performDeleteItem(scope: .all)
+      }
+      if currentItem?.local != nil && currentItem?.server == nil {
+        Button("仅删除本机照片", role: .destructive) {
           performDeleteItem(scope: .localOnly)
-        }
-      }
-      if currentItem?.server != nil {
-        Button("仅删除云端", role: .destructive) { requestRemoteOnlyDeletion() }
-      }
-      if currentItem?.local != nil && currentItem?.server != nil {
-        Button("全部删除", role: .destructive) {
-          performDeleteItem(scope: .all)
         }
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("选择要删除的副本；只删除云端时，若本机仍有原件且开启自动备份，照片可能再次上传。")
+      Text("确定要彻底删除该照片吗？")
     }
-    .alert("确认仅删除云端照片或视频", isPresented: $showViewerRemoteDeleteConfirmation) {
-      Button("取消", role: .cancel) { pendingViewerRemoteDeleteItem = nil }
-      Button("仅删除云端", role: .destructive) {
-        guard let item = pendingViewerRemoteDeleteItem else { return }
-        pendingViewerRemoteDeleteItem = nil
-        performDeleteItem(scope: .remoteOnly, item: item)
-      }
-    } message: { Text("仅删除云端副本，本机副本会保留；若开启自动备份，照片可能再次上传。") }
     .alert("删除失败", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
       Button("确定", role: .cancel) { deleteErrorMessage = nil }
     } message: {
@@ -4068,13 +3998,7 @@ struct NativeUnifiedGalleryViewer: View {
               title: "删除",
               disabled: isDeletingItem || currentItem == nil,
               action: {
-                if currentItem?.server != nil && currentItem?.local == nil {
-                  requestRemoteOnlyDeletion()
-                } else if currentItem?.local != nil && currentItem?.server == nil {
-                  performDeleteItem(scope: .localOnly)
-                } else {
-                  showDeleteScopeDialog = true
-                }
+                showDeleteConfirmationDialog = true
               }
             ) {
               Image(systemName: "trash").font(.system(size: 19))
@@ -4112,16 +4036,6 @@ struct NativeUnifiedGalleryViewer: View {
     .opacity(opacity)
   }
 
-  private func requestRemoteOnlyDeletion() {
-    guard let item = currentItem, item.server != nil, !isDeletingItem else { return }
-    if confirmRemoteOnlyDeletion {
-      pendingViewerRemoteDeleteItem = item
-      showViewerRemoteDeleteConfirmation = true
-    } else {
-      performDeleteItem(scope: .remoteOnly, item: item)
-    }
-  }
-
   private func performDeleteItem(scope: NativeDeleteTargetScope, item requestedItem: NativeGridItem? = nil) {
     guard let item = requestedItem ?? currentItem, !isDeletingItem else { return }
     isDeletingItem = true
@@ -4129,42 +4043,18 @@ struct NativeUnifiedGalleryViewer: View {
     Task {
       do {
         try await nativeDeleteGridItems([item], scope: scope, client: client, device: device)
-        // A deleted local or server copy must not keep the old reverse match.
-        // Do this for album viewers too, which have no onDeleteItem callback.
-        if let local = item.local,
-           scope != .remoteOnly || NativeSyncCacheStore.shared.serverID(for: local.id) == item.server?.id {
+        if let local = item.local {
           NativeSyncCacheStore.shared.removeMatches(localIDs: Set([local.id]))
         }
         isDeletingItem = false
         onDeleteItem?(item, scope)
-        retainViewerAfterDeleting(item, scope: scope)
+        removeCurrentViewerItem(deletingID: item.id)
       } catch {
         await MainActor.run {
           isDeletingItem = false
-          if let partial = error as? NativeDeleteOperationError,
-             let serverID = item.server?.id, partial.deletedServerIDs.contains(serverID) {
-            onDeleteItem?(item, .remoteOnly)
-            retainViewerAfterDeleting(item, scope: .remoteOnly)
-          }
           deleteErrorMessage = "删除失败：\(error.localizedDescription)"
         }
       }
-    }
-  }
-
-  private func retainViewerAfterDeleting(_ deletedItem: NativeGridItem, scope: NativeDeleteTargetScope) {
-    let deletingID = deletedItem.id
-    guard let idx = items.firstIndex(where: { $0.id == deletingID }) else {
-      if items.isEmpty { dismiss() }
-      return
-    }
-    if let remaining = nativeViewerRemainingCopy(of: deletedItem, after: scope) {
-      items[idx] = remaining
-      currentAssetID = remaining.id
-      isFavorite = remaining.isFavorite
-      showChrome = true
-    } else {
-      removeCurrentViewerItem(deletingID: deletingID)
     }
   }
 
@@ -5565,7 +5455,7 @@ struct NativeSyncSettingsSheet: View {
           }
         }
 
-        Section(header: Text("核验与黑名单")) {
+        Section(header: Text("核验")) {
           Button {
             Task {
               await cloud.retry(device.assets, client: client)
@@ -5581,10 +5471,6 @@ struct NativeSyncSettingsSheet: View {
             }
           }
           .disabled(cloud.isRunning || !syncEnabled)
-
-          NavigationLink("查看防重传黑名单") {
-            NativeUploadBlacklistView()
-          }
         }
       }
       .navigationTitle("同步设置")

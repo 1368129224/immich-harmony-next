@@ -1449,7 +1449,6 @@ enum NativeAssetState {
 enum NativeDeleteTargetScope {
   case all
   case localOnly
-  case remoteOnly
 }
 
 // A partial deletion keeps the other copy on the very same viewer page.
@@ -1457,7 +1456,6 @@ func nativeViewerRemainingCopy(of item: NativeGridItem, after scope: NativeDelet
   switch scope {
   case .all: return nil
   case .localOnly: return item.server.map { NativeGridItem(server: $0, local: nil) }
-  case .remoteOnly: return item.local.map { NativeGridItem(server: nil, local: $0) }
   }
 }
 
@@ -1494,8 +1492,6 @@ func nativeDeleteGridItems(
       if let lid = item.local?.id { localIDs.append(lid) }
     case .localOnly:
       if let lid = item.local?.id { localIDs.append(lid) }
-    case .remoteOnly:
-      if let sid = item.server?.id { serverIDs.append(sid) }
     }
   }
 
@@ -3202,10 +3198,7 @@ private struct NativeAlbumDetail: View {
 
   @State private var isSelecting = false
   @State private var selectedIDs: Set<String> = []
-  @AppStorage("immichz_confirm_remote_only_deletion") private var confirmRemoteOnlyDeletion = true
   @State private var showDeleteConfirmation = false
-  @State private var showRemoteOnlyDeleteConfirmation = false
-  @State private var pendingRemoteOnlyDeleteTargets: [NativeGridItem] = []
   @State private var showLocalDeleteWarning = false
   @State private var pendingDeleteScope: NativeDeleteTargetScope = .all
   @State private var deletionError: String?
@@ -3351,27 +3344,14 @@ private struct NativeAlbumDetail: View {
       NativeActivityView(activityItems: payload.content)
     }
     .confirmationDialog("删除选中的 \(selectedIDs.count) 项照片", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-      if selectedTargets.contains(where: { $0.local != nil }) && selectedTargets.contains(where: { $0.server != nil }) {
-        Button("全部删除（本地与云端）", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all) } }
-      }
-      if selectedTargets.contains(where: { $0.local != nil }) {
+      Button("全部删除（本地与云端）", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all) } }
+      if selectedTargets.contains(where: { $0.local != nil && $0.server == nil }) {
         Button("仅删除本地照片", role: .destructive) { Task { await deleteSelectedPhotos(scope: .localOnly) } }
-      }
-      if selectedTargets.contains(where: { $0.server != nil }) {
-        Button("仅删除云端照片", role: .destructive) { requestRemoteOnlyDeletion() }
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("所选内容中本机 \(nativePhotosSelectionActionAvailability(selectedTargets).local) 项、云端 \(nativePhotosSelectionActionAvailability(selectedTargets).server) 项；不在指定来源的项目将跳过。仅删除云端而保留本机时，若自动备份开启，照片可能再次上传。请确认删除范围。")
+      Text("确定要删除所选照片吗？操作将同步移除对应副本。")
     }
-    .alert("确认仅删除云端照片或视频", isPresented: $showRemoteOnlyDeleteConfirmation) {
-      Button("取消", role: .cancel) { pendingRemoteOnlyDeleteTargets = [] }
-      Button("仅删除云端", role: .destructive) {
-        let targets = pendingRemoteOnlyDeleteTargets
-        pendingRemoteOnlyDeleteTargets = []
-        Task { await performSelectedDeletion(targets: targets, scope: .remoteOnly) }
-      }
-    } message: { Text("将删除所选的 \(pendingRemoteOnlyDeleteTargets.count) 项云端副本；本机副本会保留。若开启自动备份，照片可能再次上传。") }
     .alert("本机删除确认", isPresented: $showLocalDeleteWarning) {
       Button("取消", role: .cancel) {}
       Button("继续删除", role: .destructive) {
@@ -3379,7 +3359,7 @@ private struct NativeAlbumDetail: View {
         let scope = pendingDeleteScope
         Task { await performSelectedDeletion(targets: targets, scope: scope) }
       }
-    } message: { Text("删除本机照片会永久从系统照片中移除；若开启 iCloud 照片，可能同步到其他设备。将只执行你选择的删除范围。") }
+    } message: { Text("删除本机照片会永久从系统照片中移除；若开启 iCloud 照片，可能同步到其他设备。") }
     .alert("删除失败", isPresented: Binding(get: { deletionError != nil }, set: { if !$0 { deletionError = nil } })) {
       Button("确定", role: .cancel) { deletionError = nil }
     } message: { Text(deletionError ?? "未知错误") }
@@ -3402,24 +3382,12 @@ private struct NativeAlbumDetail: View {
     return items.filter { selectedIDs.contains($0.id) }
   }
 
-  private func requestRemoteOnlyDeletion() {
-    guard !isDeleting else { return }
-    let targets = selectedTargets.filter { $0.server != nil }
-    guard !targets.isEmpty else { return }
-    if confirmRemoteOnlyDeletion {
-      pendingRemoteOnlyDeleteTargets = targets
-      showRemoteOnlyDeleteConfirmation = true
-    } else {
-      Task { await performSelectedDeletion(targets: targets, scope: .remoteOnly) }
-    }
-  }
-
   private func deleteSelectedPhotos(scope: NativeDeleteTargetScope = .all) async {
     pendingDeleteScope = scope
     guard !isDeleting else { return }
     let targets = selectedTargets
     guard !targets.isEmpty else { return }
-    if scope != .remoteOnly && targets.contains(where: { $0.local != nil }) {
+    if targets.contains(where: { $0.local != nil }) {
       pendingDeleteScope = scope
       showLocalDeleteWarning = true
       return
@@ -3583,7 +3551,6 @@ private struct NativeLibraryView: View {
   @ObservedObject var device: NativeDeviceLibrary
   @ObservedObject var matchedAssetDiagnostics: NativeMatchedAssetDiagnostics
   @AppStorage("immichz_merge_albums") private var mergeAlbums = true
-  @AppStorage("immichz_confirm_remote_only_deletion") private var confirmRemoteOnlyDeletion = true
   @State private var features: [String: Any] = [:]
   @State private var showDebugSheet = false
   @State private var versionTapCount = 0
@@ -3632,16 +3599,6 @@ private struct NativeLibraryView: View {
           NavigationLink("照片页") {
             NativePhotosPageSettingsView(client: client, device: device)
           }
-        }
-        Section {
-          Toggle("仅删除云端照片或视频时确认", isOn: $confirmRemoteOnlyDeletion)
-          NavigationLink("防重传黑名单") {
-            NativeUploadBlacklistView()
-          }
-        } header: {
-          Text("删除与防重传设置")
-        } footer: {
-          Text("关闭确认后，仅删除云端副本会直接执行。防重传黑名单可管理已被阻止再次自动上传的本地照片。")
         }
         Section("快捷入口") {
           NavigationLink("收藏") { NativeFilteredView(client: client, title: "收藏", filter: ["isFavorite": ["eq": true]]) }
