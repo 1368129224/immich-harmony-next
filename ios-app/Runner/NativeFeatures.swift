@@ -4155,9 +4155,16 @@ private struct TabBarDoubleTapHelper: UIViewRepresentable {
     context.coordinator.setup(from: uiView)
   }
 
-  final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+  static func dismantleUIView(_ uiView: TabBarFinderView, coordinator: Coordinator) {
+    uiView.onSetup = nil
+    coordinator.detach()
+  }
+
+  final class Coordinator: NSObject, UIGestureRecognizerDelegate, UITabBarControllerDelegate {
     var onPhotosDoubleTap: () -> Void
+    private weak var previousDelegate: UITabBarControllerDelegate?
     private weak var tabBar: UITabBar?
+    private weak var tabBarController: UITabBarController?
     private var doubleTapGesture: UITapGestureRecognizer?
 
     init(onPhotosDoubleTap: @escaping () -> Void) {
@@ -4165,6 +4172,16 @@ private struct TabBarDoubleTapHelper: UIViewRepresentable {
     }
 
     func setup(from view: UIView) {
+      if let tbc = findTabBarController(from: view) {
+        if self.tabBarController !== tbc {
+          detach()
+          self.tabBarController = tbc
+        }
+        if tbc.delegate !== self {
+          previousDelegate = tbc.delegate
+          tbc.delegate = self
+        }
+      }
       guard let tabBar = findTabBar(from: view) else { return }
       if self.tabBar === tabBar { return }
       if let existing = doubleTapGesture, let oldBar = self.tabBar {
@@ -4179,6 +4196,67 @@ private struct TabBarDoubleTapHelper: UIViewRepresentable {
       doubleTap.delegate = self
       tabBar.addGestureRecognizer(doubleTap)
       self.doubleTapGesture = doubleTap
+    }
+
+    private func findTabBarController(from view: UIView) -> UITabBarController? {
+      var responder: UIResponder? = view
+      while let r = responder {
+        if let tc = r as? UITabBarController { return tc }
+        if let vc = r as? UIViewController, let tc = vc.tabBarController { return tc }
+        responder = r.next
+      }
+      if let window = view.window ?? UIApplication.shared.connectedScenes
+        .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
+        .first {
+        return findTabBarControllerIn(view: window)
+      }
+      return nil
+    }
+
+    private func findTabBarControllerIn(view: UIView) -> UITabBarController? {
+      var responder: UIResponder? = view
+      while let r = responder {
+        if let tc = r as? UITabBarController { return tc }
+        responder = r.next
+      }
+      for sub in view.subviews {
+        if let tc = findTabBarControllerIn(view: sub) { return tc }
+      }
+      return nil
+    }
+
+    func detach() {
+      if let gesture = doubleTapGesture { tabBar?.removeGestureRecognizer(gesture) }
+      doubleTapGesture = nil
+      tabBar = nil
+      if let controller = tabBarController, controller.delegate === self {
+        controller.delegate = previousDelegate
+      }
+      tabBarController = nil
+      previousDelegate = nil
+    }
+
+    // SwiftUI owns the original delegate. Forward its optional callbacks so
+    // intercepting a re-tap does not break TabView's selection binding.
+    override func responds(to selector: Selector!) -> Bool {
+      super.responds(to: selector) || (previousDelegate?.responds(to: selector) ?? false)
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+      if previousDelegate?.responds(to: selector) == true { return previousDelegate }
+      return super.forwardingTarget(for: selector)
+    }
+
+    func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+      // If the user single-taps the already selected Photos tab (index 0),
+      // returning false suppresses UIKit's default scroll-to-top behavior
+      // while leaving double-tap and normal switching intact.
+      if tabBarController.selectedViewController === viewController {
+        if let vcs = tabBarController.viewControllers, vcs.first === viewController {
+          return false
+        }
+      }
+      return previousDelegate?.tabBarController?(tabBarController, shouldSelect: viewController) ?? true
     }
 
     private func findTabBar(from view: UIView) -> UITabBar? {
@@ -4209,8 +4287,12 @@ private struct TabBarDoubleTapHelper: UIViewRepresentable {
       let location = gesture.location(in: tabBar)
       let width = tabBar.bounds.width
       guard width > 0 else { return }
-      let tabWidth = width / 4.0
-      if location.x >= 0 && location.x <= tabWidth && location.y >= 0 && location.y <= tabBar.bounds.height {
+      let itemCount = tabBar.items?.count ?? 0
+      guard itemCount > 0 else { return }
+      let tabWidth = width / CGFloat(itemCount)
+      let isRTL = tabBar.effectiveUserInterfaceLayoutDirection == .rightToLeft
+      let photosMinX = isRTL ? width - tabWidth : 0
+      if location.x >= photosMinX && location.x <= photosMinX + tabWidth && location.y >= 0 && location.y <= tabBar.bounds.height {
         onPhotosDoubleTap()
       }
     }

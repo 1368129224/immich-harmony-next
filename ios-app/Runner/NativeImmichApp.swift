@@ -2139,7 +2139,11 @@ struct NativePhotosView: View {
   private func timelineChromeContent<Content: View>(_ content: Content, proxy: ScrollViewProxy) -> some View {
     content
         .safeAreaInset(edge: .bottom, spacing: 0) {
-          if isSelecting {
+          // Keep both bars in the same layout footprint. Changing the inset's
+          // height on selection would resize the scroll viewport and shift it,
+          // especially at the latest/bottom edge. Do not scrollTo to compensate:
+          // centering a nearby asset also loses the user's exact pixel offset.
+          ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
               batchActionButton("square.and.arrow.up", label: "分享", disabled: selectedIDs.isEmpty || isPreparingBatchShare) { triggerBatchShare() }
               batchActionButton("heart", label: "收藏", disabled: selectedIDs.isEmpty) { Task { await updateBatchFavorites() } }
@@ -2153,7 +2157,10 @@ struct NativePhotosView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 10)
             .background(.ultraThinMaterial)
-          } else {
+            .opacity(isSelecting ? 1 : 0)
+            .allowsHitTesting(isSelecting)
+            .accessibilityHidden(!isSelecting)
+
             VStack(spacing: 6) {
               if !device.authorized && sourceFilter != .server {
                 Button("允许访问本机照片（可选）") { Task { await device.requestAccess() } }.padding(6)
@@ -2223,6 +2230,9 @@ struct NativePhotosView: View {
               .padding(.bottom, 6)
               .animation(.spring(response: 0.35, dampingFraction: 0.8), value: userMovedTimeline)
             }
+            .opacity(isSelecting ? 0 : 1)
+            .allowsHitTesting(!isSelecting)
+            .accessibilityHidden(isSelecting)
           }
         }
         .navigationTitle("照片")
@@ -2881,7 +2891,10 @@ struct NativePhotosView: View {
           withAnimation(.none) { proxy.scrollTo(bottomAnchor, anchor: .bottom) }
         }
         didInitialPosition = true
-        try? await Task.sleep(nanoseconds: 40_000_000)
+        // Let the explicit return-to-latest animation finish before a lazy
+        // layout correction; a 40ms correction would cut it off mid-flight.
+        let settleDelay: UInt64 = animated && index == 0 ? 300_000_000 : 40_000_000
+        try? await Task.sleep(nanoseconds: settleDelay)
         if nativeTimelineBottomReached(
           anchorFrame: timelineBottomAnchorFrame,
           viewportFrame: timelineViewportFrame
