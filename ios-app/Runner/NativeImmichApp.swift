@@ -1888,6 +1888,7 @@ struct NativePhotosView: View {
             keepBottomUntilUserScrolls(proxy: proxy)
           }
           scheduleBackgroundCloudCheck()
+          NativeBackupEngine.shared.triggerBackupPass(assets: device.assets, client: client)
           if pendingSourceChangeScroll { positionAtLatestAfterSourceChange(proxy: proxy) }
         }
         .onChange(of: device.hasLoadedInitialSnapshot) { _ in
@@ -5447,6 +5448,7 @@ struct NativeSyncSettingsSheet: View {
   let client: NativeImmichClient
   @ObservedObject var device: NativeDeviceLibrary
   @ObservedObject var cloud: NativeCloudStatus
+  @ObservedObject private var backupEngine = NativeBackupEngine.shared
   @Environment(\.dismiss) private var dismiss
 
   @AppStorage("backup_enabled") private var legacySyncEnabled = true
@@ -5465,6 +5467,48 @@ struct NativeSyncSettingsSheet: View {
   var body: some View {
     NavigationView {
       Form {
+        Section(header: Text("自动备份引擎"), footer: Text("支持原图与实况照片 (Live Photo) 双轨原子上传；开启后新照片将自动备份到 Immich 服务器。")) {
+          Toggle("开启自动备份", isOn: Binding(
+            get: { backupEngine.isBackupEnabled },
+            set: { backupEngine.isBackupEnabled = $0 }
+          ))
+
+          Toggle("仅在 Wi-Fi 下备份", isOn: Binding(
+            get: { backupEngine.requireWifi },
+            set: { backupEngine.requireWifi = $0 }
+          ))
+          .disabled(!backupEngine.isBackupEnabled)
+
+          if backupEngine.isRunning {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack {
+                Text(backupEngine.statusMessage ?? "正在备份...")
+                  .font(.subheadline)
+                Spacer()
+                ProgressView()
+                  .scaleEffect(0.8)
+              }
+              ProgressView(value: backupEngine.currentProgress)
+            }
+            .padding(.vertical, 4)
+
+            Button("暂停备份", role: .destructive) {
+              backupEngine.cancel()
+            }
+          } else {
+            Button("立即执行备份") {
+              backupEngine.triggerBackupPass(assets: device.assets, client: client, force: true)
+            }
+            .disabled(!backupEngine.isBackupEnabled)
+
+            if let msg = backupEngine.statusMessage {
+              Text(msg)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+          }
+        }
+
         Section(header: Text("同步开关与网络偏好"), footer: Text("关闭同步开关将暂停自动核验与同步任务。“仅 WiFi 同步”可节省蜂窝流量；开启后视频亦仅在连接 Wi-Fi 时同步。")) {
           Toggle("同步开关", isOn: Binding(
             get: { syncEnabled },

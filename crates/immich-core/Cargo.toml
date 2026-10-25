@@ -6,7 +6,7 @@ description = "Platform-agnostic Rust core for Immich HarmonyOS NEXT client"
 license = "MIT"
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip", "multipart"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "io-util", "sync"] }
 serde = { version = "1.0", features = ["derive"] }

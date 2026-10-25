@@ -251,6 +251,119 @@ impl ImmichCore {
 
         Ok(None)
     }
+
+    /// Check upload candidates in bulk, automatically filtering out tombstoned assets.
+    pub async fn check_bulk_upload_candidates(
+        &self,
+        candidates: Vec<client::BulkUploadCheckItem>,
+    ) -> Result<Vec<client::BulkUploadCheckResult>, CoreError> {
+        // 1. Filter out local assets that are tombstoned
+        let mut non_tombstoned = Vec::with_capacity(candidates.len());
+        let mut tombstoned_results = Vec::new();
+
+        for item in candidates {
+            if self.db.is_upload_tombstoned(&item.id).unwrap_or(false) {
+                tombstoned_results.push(client::BulkUploadCheckResult {
+                    id: item.id,
+                    action: "reject".to_string(),
+                    reason: Some("tombstoned".to_string()),
+                    asset_id: None,
+                });
+            } else {
+                non_tombstoned.push(item);
+            }
+        }
+
+        // 2. Query remote server
+        let mut results = tombstoned_results;
+        if !non_tombstoned.is_empty() {
+            let client = self.client.read().await;
+            let remote_results = client.bulk_upload_check(non_tombstoned).await?;
+            for r in &remote_results {
+                if r.action == "reject" && r.reason.as_deref() == Some("duplicate") {
+                    let _ = self.db.set_upload_sync_status(
+                        &r.id,
+                        r.asset_id.as_deref(),
+                        None,
+                        "completed",
+                        None,
+                    );
+                }
+            }
+            results.extend(remote_results);
+        }
+
+        Ok(results)
+    }
+
+    /// Upload a single asset with full dual-track support (primary + live photo video)
+    pub async fn upload_single_asset(
+        &self,
+        device_asset_id: &str,
+        device_id: &str,
+        file_created_at: &str,
+        file_modified_at: &str,
+        is_favorite: bool,
+        file_bytes: Vec<u8>,
+        file_name: &str,
+        live_photo_bytes: Option<Vec<u8>>,
+        live_photo_name: Option<&str>,
+    ) -> Result<client::AssetUploadResponse, CoreError> {
+        // Check tombstone
+        if self.db.is_upload_tombstoned(device_asset_id).unwrap_or(false) {
+            return Err(CoreError::Client(client::ClientError::ServerStatus(
+                reqwest::StatusCode::CONFLICT,
+                "Asset is tombstoned and cannot be auto-uploaded".to_string(),
+            )));
+        }
+
+        let _ = self.db.set_upload_sync_status(
+            device_asset_id,
+            None,
+            None,
+            "uploading",
+            None,
+        );
+
+        let client = self.client.read().await;
+        let res = client
+            .upload_asset(
+                device_asset_id,
+                device_id,
+                file_created_at,
+                file_modified_at,
+                is_favorite,
+                file_bytes,
+                file_name,
+                live_photo_bytes,
+                live_photo_name,
+            )
+            .await;
+
+        match res {
+            Ok(ref upload_res) => {
+                let _ = self.db.set_upload_sync_status(
+                    device_asset_id,
+                    Some(&upload_res.id),
+                    None,
+                    "completed",
+                    None,
+                );
+            }
+            Err(ref e) => {
+                let err_msg = e.to_string();
+                let _ = self.db.set_upload_sync_status(
+                    device_asset_id,
+                    None,
+                    None,
+                    "failed",
+                    Some(&err_msg),
+                );
+            }
+        }
+
+        res.map_err(CoreError::Client)
+    }
 }
 
 #[cfg(test)]

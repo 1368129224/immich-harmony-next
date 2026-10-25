@@ -814,5 +814,25 @@ final class RunnerTests: XCTestCase {
     let exif = try await bridge.getAssetExif(assetId: "mock-core-live-1")
     XCTAssertEqual(exif?.make, "Apple")
     XCTAssertEqual(exif?.model, "iPhone 16 Pro")
+
+    // Test Bulk Upload Check & Dual-track upload in Mock Mode
+    let candidates = [CoreBulkUploadCheckItem(id: "local-1", checksum: "dummy-sha1")]
+    let checkResults = try await bridge.bulkUploadCheck(candidates: candidates)
+    XCTAssertEqual(checkResults.count, 1)
+    XCTAssertEqual(checkResults[0].action, "accept")
+
+    let uploadResp = try await bridge.uploadAsset(
+      deviceAssetId: "local-1",
+      deviceId: "ios-test-device",
+      fileCreatedAt: "2024-03-01T12:00:00.000Z",
+      fileModifiedAt: "2024-03-01T12:00:00.000Z",
+      isFavorite: false,
+      fileData: Data("MOCK_IMAGE_DATA".utf8),
+      fileName: "IMG_0001.HEIC",
+      livePhotoData: Data("MOCK_VIDEO_DATA".utf8),
+      livePhotoName: "IMG_0001.MOV"
+    )
+    XCTAssertFalse(uploadResp.id.isEmpty)
+    XCTAssertFalse(uploadResp.duplicate)
   }
 }

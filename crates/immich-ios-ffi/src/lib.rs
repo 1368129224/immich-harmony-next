@@ -270,6 +270,118 @@ pub extern "C" fn immich_ios_get_cached_bucket_assets(time_bucket: *const c_char
     make_json_response(run())
 }
 
+/// Bulk upload check candidate assets against Immich server and local tombstones.
+/// `candidates_json`: JSON string array `[{"id": "...", "checksum": "..."}]`
+/// Returns JSON envelope: `{"success": true, "data": [{"id": "...", "action": "accept"|"reject", "reason": "...", "assetId": "..."}]}`
+#[no_mangle]
+pub extern "C" fn immich_ios_bulk_upload_check(candidates_json: *const c_char) -> *mut c_char {
+    let run = || -> Result<serde_json::Value, String> {
+        let json_str = c_str_to_rust(candidates_json)?;
+        let candidates: Vec<immich_core::client::BulkUploadCheckItem> = serde_json::from_str(&json_str)
+            .map_err(|e| format!("Invalid candidates JSON: {}", e))?;
+        let core = get_core()?;
+
+        let results = get_runtime()
+            .block_on(async { core.check_bulk_upload_candidates(candidates).await })
+            .map_err(|e| format!("Bulk upload check error: {}", e))?;
+
+        serde_json::to_value(&results).map_err(|e| format!("Serialization error: {}", e))
+    };
+
+    make_json_response(run())
+}
+
+/// Upload a single asset with full dual-track support (primary + live photo video).
+#[no_mangle]
+pub extern "C" fn immich_ios_upload_asset(
+    device_asset_id: *const c_char,
+    device_id: *const c_char,
+    file_created_at: *const c_char,
+    file_modified_at: *const c_char,
+    is_favorite: bool,
+    file_bytes_ptr: *const u8,
+    file_bytes_len: usize,
+    file_name: *const c_char,
+    live_photo_bytes_ptr: *const u8,
+    live_photo_bytes_len: usize,
+    live_photo_name: *const c_char,
+) -> *mut c_char {
+    let run = || -> Result<serde_json::Value, String> {
+        let local_id = c_str_to_rust(device_asset_id)?;
+        let dev_id = c_str_to_rust(device_id)?;
+        let created_at = c_str_to_rust(file_created_at)?;
+        let modified_at = c_str_to_rust(file_modified_at)?;
+        let fname = c_str_to_rust(file_name)?;
+
+        if file_bytes_ptr.is_null() || file_bytes_len == 0 {
+            return Err("Primary file bytes cannot be empty".to_string());
+        }
+        let primary_bytes = unsafe { std::slice::from_raw_parts(file_bytes_ptr, file_bytes_len).to_vec() };
+
+        let (live_bytes, live_name) = if !live_photo_bytes_ptr.is_null() && live_photo_bytes_len > 0 && !live_photo_name.is_null() {
+            let b = unsafe { std::slice::from_raw_parts(live_photo_bytes_ptr, live_photo_bytes_len).to_vec() };
+            let n = c_str_to_rust(live_photo_name)?;
+            (Some(b), Some(n))
+        } else {
+            (None, None)
+        };
+
+        let core = get_core()?;
+        let resp = get_runtime()
+            .block_on(async {
+                core.upload_single_asset(
+                    &local_id,
+                    &dev_id,
+                    &created_at,
+                    &modified_at,
+                    is_favorite,
+                    primary_bytes,
+                    &fname,
+                    live_bytes,
+                    live_name.as_deref(),
+                )
+                .await
+            })
+            .map_err(|e| format!("Upload error: {}", e))?;
+
+        serde_json::to_value(&resp).map_err(|e| format!("Serialization error: {}", e))
+    };
+
+    make_json_response(run())
+}
+
+/// Mark a local asset as tombstoned (cannot be re-uploaded automatically)
+#[no_mangle]
+pub extern "C" fn immich_ios_add_upload_tombstone(
+    local_asset_id: *const c_char,
+    account_id: *const c_char,
+    reason: *const c_char,
+) -> *mut c_char {
+    let run = || -> Result<bool, String> {
+        let local_id = c_str_to_rust(local_asset_id)?;
+        let acc_id = c_str_to_rust(account_id)?;
+        let r = c_str_to_rust(reason)?;
+        let core = get_core()?;
+
+        core.db.add_upload_tombstone(&local_id, &acc_id, &r)
+            .map_err(|e| format!("Add tombstone error: {}", e))?;
+        Ok(true)
+    };
+
+    make_json_response(run())
+}
+
+/// Check if a local asset is tombstoned
+#[no_mangle]
+pub extern "C" fn immich_ios_is_upload_tombstoned(local_asset_id: *const c_char) -> bool {
+    if let Ok(local_id) = c_str_to_rust(local_asset_id) {
+        if let Ok(core) = get_core() {
+            return core.db.is_upload_tombstoned(&local_id).unwrap_or(false);
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

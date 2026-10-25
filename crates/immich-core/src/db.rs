@@ -74,6 +74,22 @@ impl DbEngine {
 
             CREATE INDEX IF NOT EXISTS idx_assets_bucket ON assets(bucket_id);
             CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(file_created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS upload_tombstones (
+                local_asset_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS upload_sync_status (
+                local_asset_id TEXT PRIMARY KEY,
+                server_asset_id TEXT,
+                checksum TEXT,
+                status TEXT NOT NULL, -- 'pending', 'uploading', 'completed', 'failed', 'rejected'
+                error_message TEXT,
+                updated_at INTEGER NOT NULL
+            );
             ",
         )?;
 
@@ -312,9 +328,88 @@ impl DbEngine {
         conn.execute_batch(
             "DELETE FROM assets;
              DELETE FROM buckets;
-             DELETE FROM server_config;",
+             DELETE FROM server_config;
+             DELETE FROM upload_tombstones;
+             DELETE FROM upload_sync_status;",
         )?;
         Ok(())
+    }
+
+    // MARK: - Upload Sync & Tombstone Methods
+
+    /// Add a tombstone to prevent an asset from being automatically re-uploaded (e.g. after cloud deletion)
+    pub fn add_upload_tombstone(&self, local_id: &str, account_id: &str, reason: &str) -> Result<(), DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT INTO upload_tombstones (local_asset_id, account_id, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(local_asset_id) DO UPDATE SET
+                account_id = excluded.account_id,
+                reason = excluded.reason,
+                created_at = excluded.created_at",
+            params![local_id, account_id, reason, now],
+        )?;
+        Ok(())
+    }
+
+    /// Check if a local asset has a tombstone preventing auto-upload
+    pub fn is_upload_tombstoned(&self, local_id: &str) -> Result<bool, DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let mut stmt = conn.prepare("SELECT 1 FROM upload_tombstones WHERE local_asset_id = ?1")?;
+        let exists = stmt.exists(params![local_id])?;
+        Ok(exists)
+    }
+
+    /// Remove a tombstone if user manually triggers upload
+    pub fn remove_upload_tombstone(&self, local_id: &str) -> Result<(), DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        conn.execute(
+            "DELETE FROM upload_tombstones WHERE local_asset_id = ?1",
+            params![local_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update upload sync status for a local asset
+    pub fn set_upload_sync_status(
+        &self,
+        local_id: &str,
+        server_id: Option<&str>,
+        checksum: Option<&str>,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<(), DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT INTO upload_sync_status (local_asset_id, server_asset_id, checksum, status, error_message, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(local_asset_id) DO UPDATE SET
+                server_asset_id = COALESCE(excluded.server_asset_id, upload_sync_status.server_asset_id),
+                checksum = COALESCE(excluded.checksum, upload_sync_status.checksum),
+                status = excluded.status,
+                error_message = excluded.error_message,
+                updated_at = excluded.updated_at",
+            params![local_id, server_id, checksum, status, error_message, now],
+        )?;
+        Ok(())
+    }
+
+    /// Get upload sync status for a local asset
+    pub fn get_upload_sync_status(&self, local_id: &str) -> Result<Option<(String, Option<String>)>, DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let mut stmt = conn.prepare("SELECT status, server_asset_id FROM upload_sync_status WHERE local_asset_id = ?1")?;
+        let res = stmt
+            .query_row(params![local_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?;
+        Ok(res)
     }
 }
 

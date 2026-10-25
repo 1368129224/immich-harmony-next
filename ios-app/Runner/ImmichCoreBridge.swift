@@ -57,6 +57,38 @@ private func c_immich_ios_get_asset_exif(
   _ assetId: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("immich_ios_bulk_upload_check")
+private func c_immich_ios_bulk_upload_check(
+  _ candidatesJson: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("immich_ios_upload_asset")
+private func c_immich_ios_upload_asset(
+  _ deviceAssetId: UnsafePointer<CChar>?,
+  _ deviceId: UnsafePointer<CChar>?,
+  _ fileCreatedAt: UnsafePointer<CChar>?,
+  _ fileModifiedAt: UnsafePointer<CChar>?,
+  _ isFavorite: Bool,
+  _ fileBytesPtr: UnsafePointer<UInt8>?,
+  _ fileBytesLen: Int,
+  _ fileName: UnsafePointer<CChar>?,
+  _ livePhotoBytesPtr: UnsafePointer<UInt8>?,
+  _ livePhotoBytesLen: Int,
+  _ livePhotoName: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("immich_ios_add_upload_tombstone")
+private func c_immich_ios_add_upload_tombstone(
+  _ localAssetId: UnsafePointer<CChar>?,
+  _ accountId: UnsafePointer<CChar>?,
+  _ reason: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("immich_ios_is_upload_tombstoned")
+private func c_immich_ios_is_upload_tombstoned(
+  _ localAssetId: UnsafePointer<CChar>?
+) -> Bool
+
 // MARK: - Data Models
 
 public struct CoreBucketInfo: Codable, Identifiable, Sendable {
@@ -106,6 +138,27 @@ public struct CoreAssetViewerBundle: Codable, Sendable {
   public let videoPath: String?
   public let isLivePhoto: Bool
   public let duration: String?
+}
+
+public struct CoreBulkUploadCheckItem: Codable, Sendable {
+  public let id: String
+  public let checksum: String
+  public init(id: String, checksum: String) {
+    self.id = id
+    self.checksum = checksum
+  }
+}
+
+public struct CoreBulkUploadCheckResult: Codable, Sendable {
+  public let id: String
+  public let action: String // "accept" or "reject"
+  public let reason: String? // "duplicate", "tombstoned", etc.
+  public let assetId: String?
+}
+
+public struct CoreAssetUploadResponse: Codable, Sendable {
+  public let id: String
+  public let duplicate: Bool
 }
 
 public enum ImmichCoreBridgeError: LocalizedError {
@@ -380,6 +433,100 @@ public final class ImmichCoreBridge: @unchecked Sendable {
       }
       return exif
     }.value
+  }
+
+  /// Bulk upload check candidate assets against Immich server and local tombstones.
+  public func bulkUploadCheck(candidates: [CoreBulkUploadCheckItem]) async throws -> [CoreBulkUploadCheckResult] {
+    if isMockMode {
+      return candidates.map {
+        CoreBulkUploadCheckResult(id: $0.id, action: "accept", reason: nil, assetId: nil)
+      }
+    }
+
+    let jsonStr = String(data: try JSONEncoder().encode(candidates), encoding: .utf8) ?? "[]"
+
+    return try await Task.detached { [self] in
+      let results: [CoreBulkUploadCheckResult] = try invokeFfi {
+        jsonStr.withCString { c_immich_ios_bulk_upload_check($0) }
+      }
+      return results
+    }.value
+  }
+
+  /// Upload a single asset with full dual-track support (primary photo/video + optional Live Photo paired video).
+  public func uploadAsset(
+    deviceAssetId: String,
+    deviceId: String,
+    fileCreatedAt: String,
+    fileModifiedAt: String,
+    isFavorite: Bool,
+    fileData: Data,
+    fileName: String,
+    livePhotoData: Data? = nil,
+    livePhotoName: String? = nil
+  ) async throws -> CoreAssetUploadResponse {
+    if isMockMode {
+      return CoreAssetUploadResponse(id: UUID().uuidString, duplicate: false)
+    }
+
+    return try await Task.detached { [self] in
+      let res: CoreAssetUploadResponse = try invokeFfi {
+        deviceAssetId.withCString { cId in
+          deviceId.withCString { cDev in
+            fileCreatedAt.withCString { cCreated in
+              fileModifiedAt.withCString { cModified in
+                fileName.withCString { cName in
+                  fileData.withUnsafeBytes { rawBytes in
+                    let ptr = rawBytes.bindMemory(to: UInt8.self).baseAddress
+                    if let liveData = livePhotoData, let lName = livePhotoName {
+                      return liveData.withUnsafeBytes { rawLiveBytes in
+                        let livePtr = rawLiveBytes.bindMemory(to: UInt8.self).baseAddress
+                        return lName.withCString { cLiveName in
+                          c_immich_ios_upload_asset(
+                            cId, cDev, cCreated, cModified, isFavorite,
+                            ptr, fileData.count, cName,
+                            livePtr, liveData.count, cLiveName
+                          )
+                        }
+                      }
+                    } else {
+                      return c_immich_ios_upload_asset(
+                        cId, cDev, cCreated, cModified, isFavorite,
+                        ptr, fileData.count, cName,
+                        nil, 0, nil
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      return res
+    }.value
+  }
+
+  /// Add tombstone to prevent an asset from being automatically re-uploaded (e.g. after cloud deletion)
+  public func addUploadTombstone(localAssetId: String, accountId: String, reason: String = "deleted_from_cloud") async throws {
+    if isMockMode { return }
+    let _: Bool = try await Task.detached { [self] in
+      try invokeFfi {
+        localAssetId.withCString { cId in
+          accountId.withCString { cAcc in
+            reason.withCString { cRea in
+              c_immich_ios_add_upload_tombstone(cId, cAcc, cRea)
+            }
+          }
+        }
+      }
+    }.value
+  }
+
+  /// Check whether a local asset has been tombstoned
+  public func isUploadTombstoned(localAssetId: String) -> Bool {
+    if isMockMode { return false }
+    return localAssetId.withCString { c_immich_ios_is_upload_tombstoned($0) }
   }
 
   // MARK: - Private FFI execution helper

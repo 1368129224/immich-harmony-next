@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 /**
  * Free a C-string previously allocated and returned by any immich_ios_* function.
@@ -83,5 +84,46 @@ char *immich_ios_prepare_asset_viewer_bundle(const char *asset_id);
  * Caller MUST free the returned string using immich_ios_free_string().
  */
 char *immich_ios_get_asset_exif(const char *asset_id);
+
+/**
+ * Bulk upload check candidate assets against Immich server and local tombstones.
+ * candidates_json: JSON string array [{"id": "...", "checksum": "..."}]
+ * Returns JSON envelope string: {"success": bool, "data": [BulkUploadCheckResult], "error": string | null}.
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_bulk_upload_check(const char *candidates_json);
+
+/**
+ * Upload single asset with dual-track support (primary + live photo video).
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_upload_asset(
+    const char *device_asset_id,
+    const char *device_id,
+    const char *file_created_at,
+    const char *file_modified_at,
+    bool is_favorite,
+    const uint8_t *file_bytes_ptr,
+    size_t file_bytes_len,
+    const char *file_name,
+    const uint8_t *live_photo_bytes_ptr,
+    size_t live_photo_bytes_len,
+    const char *live_photo_name
+);
+
+/**
+ * Add a tombstone to prevent an asset from being automatically re-uploaded.
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_add_upload_tombstone(
+    const char *local_asset_id,
+    const char *account_id,
+    const char *reason
+);
+
+/**
+ * Check if a local asset is tombstoned.
+ */
+bool immich_ios_is_upload_tombstoned(const char *local_asset_id);
 
 #endif /* IMMICH_CORE_FFI_H */

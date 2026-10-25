@@ -50,6 +50,42 @@ impl ThumbnailSize {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkUploadCheckItem {
+    pub id: String,
+    pub checksum: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkUploadCheckRequest {
+    pub assets: Vec<BulkUploadCheckItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkUploadCheckResult {
+    pub id: String,
+    pub action: String, // "accept" or "reject"
+    pub reason: Option<String>, // e.g. "duplicate"
+    pub asset_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkUploadCheckResponse {
+    pub results: Vec<BulkUploadCheckResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetUploadResponse {
+    pub id: String,
+    #[serde(default)]
+    pub duplicate: bool,
+}
+
 pub struct ImmichClient {
     client: Client,
     base_url: Option<String>,
@@ -385,6 +421,88 @@ impl ImmichClient {
             return Ok(Some(exif_dto));
         }
         Ok(None)
+    }
+
+    /// Perform bulk upload check (/api/assets/bulk-upload-check) to verify which assets already exist on server.
+    pub async fn bulk_upload_check(
+        &self,
+        assets: Vec<BulkUploadCheckItem>,
+    ) -> Result<Vec<BulkUploadCheckResult>, ClientError> {
+        let url = self.url("api/assets/bulk-upload-check")?;
+        let payload = BulkUploadCheckRequest { assets };
+
+        let res = self
+            .client
+            .post(&url)
+            .headers(self.auth_headers())
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let resp: BulkUploadCheckResponse = res.json().await?;
+        Ok(resp.results)
+    }
+
+    /// Upload asset with dual-track support (primary photo/video + optional Live Photo paired video).
+    pub async fn upload_asset(
+        &self,
+        device_asset_id: &str,
+        device_id: &str,
+        file_created_at: &str,
+        file_modified_at: &str,
+        is_favorite: bool,
+        file_bytes: Vec<u8>,
+        file_name: &str,
+        live_photo_bytes: Option<Vec<u8>>,
+        live_photo_name: Option<&str>,
+    ) -> Result<AssetUploadResponse, ClientError> {
+        use reqwest::multipart::{Form, Part};
+
+        let url = self.url("api/assets")?;
+
+        let asset_part = Part::bytes(file_bytes)
+            .file_name(file_name.to_string())
+            .mime_str("application/octet-stream")
+            .unwrap_or_else(|_| Part::bytes(vec![]));
+
+        let mut form = Form::new()
+            .text("deviceAssetId", device_asset_id.to_string())
+            .text("deviceId", device_id.to_string())
+            .text("fileCreatedAt", file_created_at.to_string())
+            .text("fileModifiedAt", file_modified_at.to_string())
+            .text("isFavorite", if is_favorite { "true" } else { "false" })
+            .part("assetData", asset_part);
+
+        if let (Some(live_bytes), Some(live_name)) = (live_photo_bytes, live_photo_name) {
+            let live_part = Part::bytes(live_bytes)
+                .file_name(live_name.to_string())
+                .mime_str("video/quicktime")
+                .unwrap_or_else(|_| Part::bytes(vec![]));
+            form = form.part("livePhotoData", live_part);
+        }
+
+        let res = self
+            .client
+            .post(&url)
+            .headers(self.auth_headers())
+            .multipart(form)
+            .send()
+            .await?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(ClientError::ServerStatus(status, text));
+        }
+
+        let upload_resp: AssetUploadResponse = res.json().await?;
+        Ok(upload_resp)
     }
 }
 
