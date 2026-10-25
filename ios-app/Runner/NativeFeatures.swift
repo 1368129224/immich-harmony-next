@@ -3635,10 +3635,13 @@ private struct NativeLibraryView: View {
         }
         Section {
           Toggle("仅删除云端照片或视频时确认", isOn: $confirmRemoteOnlyDeletion)
+          NavigationLink("防重传黑名单") {
+            NativeUploadBlacklistView()
+          }
         } header: {
-          Text("删除设置")
+          Text("删除与防重传设置")
         } footer: {
-          Text("关闭后，仅删除云端副本会直接执行；删除本机照片仍需确认。双端照片仍须先选择删除范围。")
+          Text("关闭确认后，仅删除云端副本会直接执行。防重传黑名单可管理已被阻止再次自动上传的本地照片。")
         }
         Section("快捷入口") {
           NavigationLink("收藏") { NativeFilteredView(client: client, title: "收藏", filter: ["isFavorite": ["eq": true]]) }

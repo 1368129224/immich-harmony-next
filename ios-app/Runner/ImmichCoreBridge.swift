@@ -89,6 +89,14 @@ private func c_immich_ios_is_upload_tombstoned(
   _ localAssetId: UnsafePointer<CChar>?
 ) -> Bool
 
+@_silgen_name("immich_ios_get_upload_tombstones")
+private func c_immich_ios_get_upload_tombstones() -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("immich_ios_remove_upload_tombstone")
+private func c_immich_ios_remove_upload_tombstone(
+  _ localAssetId: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
 // MARK: - Data Models
 
 public struct CoreBucketInfo: Codable, Identifiable, Sendable {
@@ -159,6 +167,14 @@ public struct CoreBulkUploadCheckResult: Codable, Sendable {
 public struct CoreAssetUploadResponse: Codable, Sendable {
   public let id: String
   public let duplicate: Bool
+}
+
+public struct CoreUploadTombstone: Codable, Identifiable, Sendable {
+  public var id: String { localAssetId }
+  public let localAssetId: String
+  public let accountId: String
+  public let reason: String
+  public let createdAt: Int64
 }
 
 public enum ImmichCoreBridgeError: LocalizedError {
@@ -527,6 +543,33 @@ public final class ImmichCoreBridge: @unchecked Sendable {
   public func isUploadTombstoned(localAssetId: String) -> Bool {
     if isMockMode { return false }
     return localAssetId.withCString { c_immich_ios_is_upload_tombstoned($0) }
+  }
+
+  /// Retrieve all upload tombstones
+  public func getUploadTombstones() async throws -> [CoreUploadTombstone] {
+    if isMockMode {
+      return [
+        CoreUploadTombstone(localAssetId: "mock-local-1", accountId: "default", reason: "deleted_from_cloud", createdAt: 1710000000)
+      ]
+    }
+    return try await Task.detached { [self] in
+      let tombstones: [CoreUploadTombstone] = try invokeFfi {
+        c_immich_ios_get_upload_tombstones()
+      }
+      return tombstones
+    }.value
+  }
+
+  /// Remove an upload tombstone, re-enabling auto-upload for that asset
+  public func removeUploadTombstone(localAssetId: String) async throws {
+    if isMockMode { return }
+    let _: Bool = try await Task.detached { [self] in
+      try invokeFfi {
+        localAssetId.withCString { cId in
+          c_immich_ios_remove_upload_tombstone(cId)
+        }
+      }
+    }.value
   }
 
   // MARK: - Private FFI execution helper

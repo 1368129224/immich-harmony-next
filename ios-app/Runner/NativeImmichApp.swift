@@ -2346,6 +2346,15 @@ struct NativePhotosView: View {
               if let local = deletedItem.local,
                  scope != .remoteOnly || cloud.matchedServerIDs[local.id] == deletedItem.server?.id {
                 cloud.forgetMatches(localIDs: Set([local.id]))
+                if scope == .remoteOnly {
+                  Task {
+                    try? await ImmichCoreBridge.shared.addUploadTombstone(
+                      localAssetId: local.id,
+                      accountId: NativeSyncCacheStore.shared.identity ?? "default",
+                      reason: "deleted_from_cloud"
+                    )
+                  }
+                }
               }
               userMovedTimeline = true
               device.refresh()
@@ -2536,6 +2545,14 @@ struct NativePhotosView: View {
           guard let local = item.local,
                 let serverID = cloud.matchedServerIDs[local.id], serverIDs.contains(serverID) else { continue }
           invalidatedLocalIDs.insert(local.id)
+          // Add tombstone to prevent re-uploading cloud-deleted asset if user keeps local copy
+          Task {
+            try? await ImmichCoreBridge.shared.addUploadTombstone(
+              localAssetId: local.id,
+              accountId: NativeSyncCacheStore.shared.identity ?? "default",
+              reason: "deleted_from_cloud"
+            )
+          }
         }
         cloud.forgetMatches(localIDs: invalidatedLocalIDs)
       }
@@ -5548,7 +5565,7 @@ struct NativeSyncSettingsSheet: View {
           }
         }
 
-        Section(header: Text("核验")) {
+        Section(header: Text("核验与黑名单")) {
           Button {
             Task {
               await cloud.retry(device.assets, client: client)
@@ -5565,6 +5582,9 @@ struct NativeSyncSettingsSheet: View {
           }
           .disabled(cloud.isRunning || !syncEnabled)
 
+          NavigationLink("查看防重传黑名单") {
+            NativeUploadBlacklistView()
+          }
         }
       }
       .navigationTitle("同步设置")

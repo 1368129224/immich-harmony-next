@@ -364,6 +364,20 @@ impl DbEngine {
         Ok(exists)
     }
 
+    /// Retrieve all tombstones as (local_asset_id, account_id, reason, created_at)
+    pub fn get_all_upload_tombstones(&self) -> Result<Vec<(String, String, String, i64)>, DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        let mut stmt = conn.prepare("SELECT local_asset_id, account_id, reason, created_at FROM upload_tombstones ORDER BY created_at DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
     /// Remove a tombstone if user manually triggers upload
     pub fn remove_upload_tombstone(&self, local_id: &str) -> Result<(), DbError> {
         let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;

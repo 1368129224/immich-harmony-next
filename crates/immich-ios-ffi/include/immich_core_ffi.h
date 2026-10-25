@@ -126,4 +126,17 @@ char *immich_ios_add_upload_tombstone(
  */
 bool immich_ios_is_upload_tombstoned(const char *local_asset_id);
 
+/**
+ * Get all upload tombstones.
+ * Returns JSON envelope string: {"success": bool, "data": [{"localAssetId": string, "accountId": string, "reason": string, "createdAt": number}], "error": string | null}.
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_get_upload_tombstones(void);
+
+/**
+ * Remove an upload tombstone.
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_remove_upload_tombstone(const char *local_asset_id);
+
 #endif /* IMMICH_CORE_FFI_H */

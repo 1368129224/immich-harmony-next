@@ -364,6 +364,16 @@ impl ImmichCore {
 
         res.map_err(CoreError::Client)
     }
+
+    /// List all upload tombstones
+    pub fn get_upload_tombstones(&self) -> Result<Vec<(String, String, String, i64)>, CoreError> {
+        self.db.get_all_upload_tombstones().map_err(CoreError::Db)
+    }
+
+    /// Remove an upload tombstone
+    pub fn remove_upload_tombstone(&self, local_asset_id: &str) -> Result<(), CoreError> {
+        self.db.remove_upload_tombstone(local_asset_id).map_err(CoreError::Db)
+    }
 }
 
 #[cfg(test)]

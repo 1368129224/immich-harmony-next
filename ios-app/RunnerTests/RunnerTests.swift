@@ -834,5 +834,12 @@ final class RunnerTests: XCTestCase {
     )
     XCTAssertFalse(uploadResp.id.isEmpty)
     XCTAssertFalse(uploadResp.duplicate)
+
+    // Test Tombstones in Mock Mode
+    let tombstones = try await bridge.getUploadTombstones()
+    XCTAssertEqual(tombstones.count, 1)
+    XCTAssertEqual(tombstones.first?.localAssetId, "mock-local-1")
+
+    try await bridge.removeUploadTombstone(localAssetId: "mock-local-1")
   }
 }

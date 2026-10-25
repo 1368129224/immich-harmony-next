@@ -382,6 +382,47 @@ pub extern "C" fn immich_ios_is_upload_tombstoned(local_asset_id: *const c_char)
     false
 }
 
+/// Retrieve all upload tombstones as JSON array:
+/// `[{"localAssetId": "...", "accountId": "...", "reason": "...", "createdAt": 123456789}]`
+#[no_mangle]
+pub extern "C" fn immich_ios_get_upload_tombstones() -> *mut c_char {
+    let run = || -> Result<serde_json::Value, String> {
+        let core = get_core()?;
+        let raw = core.get_upload_tombstones()
+            .map_err(|e| format!("Get tombstones error: {}", e))?;
+
+        let list: Vec<serde_json::Value> = raw
+            .into_iter()
+            .map(|(lid, aid, r, ts)| {
+                serde_json::json!({
+                    "localAssetId": lid,
+                    "accountId": aid,
+                    "reason": r,
+                    "createdAt": ts
+                })
+            })
+            .collect();
+
+        Ok(serde_json::Value::Array(list))
+    };
+
+    make_json_response(run())
+}
+
+/// Remove a tombstone from a local asset
+#[no_mangle]
+pub extern "C" fn immich_ios_remove_upload_tombstone(local_asset_id: *const c_char) -> *mut c_char {
+    let run = || -> Result<bool, String> {
+        let local_id = c_str_to_rust(local_asset_id)?;
+        let core = get_core()?;
+        core.remove_upload_tombstone(&local_id)
+            .map_err(|e| format!("Remove tombstone error: {}", e))?;
+        Ok(true)
+    };
+
+    make_json_response(run())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

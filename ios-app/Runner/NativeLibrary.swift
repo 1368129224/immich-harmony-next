@@ -121,7 +121,7 @@ struct NativePeopleView: View {
 
 struct NativePlacesView: View {
   let client: NativeImmichClient
-  @State private var places: [String: Int] = [:]
+  @State private var places: [String: (count: Int, sampleId: String?)] = [:]
   @State private var markers: [NativeMapPin] = []
   @State private var error: String?
   @State private var region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 0, longitude: 0), span: MKCoordinateSpan(latitudeDelta: 150, longitudeDelta: 150))
@@ -133,9 +133,24 @@ struct NativePlacesView: View {
       }.frame(height: 240)
       List {
         if let error { Text(error).foregroundColor(.red); Button("重试") { Task { await load() } } }
-        if places.isEmpty && error == nil { Text("暂无带位置的资产").foregroundColor(.secondary) }
+        if places.isEmpty && error == nil { Text("暂无带位置的照片").foregroundColor(.secondary) }
         ForEach(places.keys.sorted(), id: \.self) { place in
-          Text("\(place) · \(places[place] ?? 0)")
+          if let info = places[place] {
+            NavigationLink {
+              NativeFilteredView(client: client, title: place, filter: ["city": ["eq": place]])
+            } label: {
+              HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(place)
+                    .font(.body)
+                  Text("\(info.count) 张照片")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+                Spacer()
+              }
+            }
+          }
         }
       }
     }
@@ -146,13 +161,15 @@ struct NativePlacesView: View {
   private func load() async {
     do {
       let rows = try await client.libraryRows("map/markers")
-      var totals: [String: Int] = [:]
+      var totals: [String: (count: Int, sampleId: String?)] = [:]
       markers = rows.compactMap { row in
         let place = [row["city"], row["state"], row["country"]].compactMap { $0 as? String }.first(where: { !$0.isEmpty }) ?? "未知地点"
-        totals[place, default: 0] += 1
+        let id = row["id"] as? String
+        let current = totals[place] ?? (count: 0, sampleId: id)
+        totals[place] = (count: current.count + 1, sampleId: current.sampleId ?? id)
         guard let lat = row["lat"] as? Double, let lon = row["lon"] as? Double,
-              (-90...90).contains(lat), (-180...180).contains(lon), let id = row["id"] as? String else { return nil }
-        return NativeMapPin(id: id, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+              (-90...90).contains(lat), (-180...180).contains(lon), let pinId = id else { return nil }
+        return NativeMapPin(id: pinId, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
       }
       places = totals
       if let first = markers.first { region.center = first.coordinate; region.span = MKCoordinateSpan(latitudeDelta: 20, longitudeDelta: 20) }
@@ -239,10 +256,10 @@ struct NativeReleaseUpdate: Decodable {
   let downloadURL: URL
 
   static let manifestURL = URL(string:
-    "https://github.com/1368129224/immich-z/releases/download/latest-build/immichz-update.json"
+    "https://github.com/1368129224/immich-next/releases/download/latest-build/immichz-update.json"
   )!
   static let ipaURL = URL(string:
-    "https://github.com/1368129224/immich-z/releases/download/latest-build/ImmichZ-unsigned.ipa"
+    "https://github.com/1368129224/immich-next/releases/download/latest-build/ImmichZ-unsigned.ipa"
   )!
 
   func isNewer(than currentBuild: Int, bundleID: String) throws -> Bool {
@@ -505,3 +522,122 @@ struct NativeAppUpdateView: View {
     task.resume()
   }
 }
+
+// MARK: - Upload Tombstone Blacklist Management View
+
+struct NativeUploadBlacklistView: View {
+  @State private var tombstones: [CoreUploadTombstone] = []
+  @State private var loading = false
+  @State private var errorMessage: String?
+  @State private var itemToRemove: CoreUploadTombstone?
+  @State private var showConfirmRemove = false
+
+  var body: some View {
+    List {
+      Section {
+        Text("防重传黑名单（Tombstones）记录了在云端被删除但本地保留的照片。备份引擎将永久跳过这些照片，避免它们被再次自动上传到服务器。")
+          .font(.footnote)
+          .foregroundColor(.secondary)
+      }
+
+      if loading {
+        HStack {
+          Spacer()
+          ProgressView("正在加载黑名单...")
+          Spacer()
+        }
+      } else if let err = errorMessage {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(err).foregroundColor(.red).font(.subheadline)
+          Button("重试") { Task { await loadTombstones() } }
+        }
+      } else if tombstones.isEmpty {
+        VStack(alignment: .center, spacing: 12) {
+          Image(systemName: "shield.slash")
+            .font(.system(size: 40))
+            .foregroundColor(.secondary)
+          Text("暂无防重传黑名单条目")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+          Text("当您在应用内仅删除云端照片时，本地副本将自动加入此名单。")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+      } else {
+        Section(header: Text("已阻止自动上传的照片 (\(tombstones.count))")) {
+          ForEach(tombstones) { item in
+            HStack {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(item.localAssetId)
+                  .font(.system(.subheadline, design: .monospaced))
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+                HStack(spacing: 8) {
+                  Text(item.reason == "deleted_from_cloud" ? "云端删除保留本地" : item.reason)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .foregroundColor(.orange)
+                    .cornerRadius(4)
+
+                  let date = Date(timeIntervalSince1970: TimeInterval(item.createdAt))
+                  Text(date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+              }
+              Spacer()
+              Button(role: .destructive) {
+                itemToRemove = item
+                showConfirmRemove = true
+              } label: {
+                Image(systemName: "trash")
+                  .font(.subheadline)
+                  .foregroundColor(.red)
+              }
+              .buttonStyle(.borderless)
+            }
+          }
+        }
+      }
+    }
+    .navigationTitle("防重传黑名单")
+    .refreshable { await loadTombstones() }
+    .task { await loadTombstones() }
+    .alert("解除防重传限制？", isPresented: $showConfirmRemove, presenting: itemToRemove) { item in
+      Button("取消", role: .cancel) { itemToRemove = nil }
+      Button("解除限制", role: .destructive) {
+        Task { await removeTombstone(item: item) }
+      }
+    } message: { item in
+      Text("解除后，若开启自动备份且本地原图仍存在，此照片可能会被重新上传到云端。")
+    }
+  }
+
+  private func loadTombstones() async {
+    guard !loading else { return }
+    loading = true
+    errorMessage = nil
+    defer { loading = false }
+    do {
+      tombstones = try await ImmichCoreBridge.shared.getUploadTombstones()
+    } catch {
+      errorMessage = "获取黑名单失败: \(error.localizedDescription)"
+    }
+  }
+
+  private func removeTombstone(item: CoreUploadTombstone) async {
+    do {
+      try await ImmichCoreBridge.shared.removeUploadTombstone(localAssetId: item.localAssetId)
+      tombstones.removeAll { $0.localAssetId == item.localAssetId }
+      itemToRemove = nil
+    } catch {
+      errorMessage = "移除失败: \(error.localizedDescription)"
+    }
+  }
+}
+
