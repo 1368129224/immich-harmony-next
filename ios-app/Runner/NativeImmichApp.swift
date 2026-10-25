@@ -1256,7 +1256,7 @@ struct NativePhotosView: View {
   private let accountIdentity: String?
   @StateObject private var model: NativeTimelineModel
   @StateObject private var cloud = NativeCloudStatus()
-  @State private var columns: Int = 4
+  @State private var columns: Int = 5
   @State private var gestureBaseColumns: Int? = nil
   @State private var gestureAnchorID: String?
   @State private var loadingMatchedServerIDs = Set<String>()
@@ -2744,8 +2744,8 @@ struct NativePhotosView: View {
       switch level {
       case "年": columns = 7
       case "月": columns = 5
-      case "日": columns = 3
-      default: columns = 4
+      case "日": columns = 4
+      default: columns = 5
       }
     }
     guard isInitialTimelineVisible else { return } // Cold-start positioning owns its own scroll.
@@ -4502,7 +4502,7 @@ private struct NativeSingleAssetPage: View {
   @State private var isLivePlaying = false
 
   // 视频播放与进度控制
-  @State private var isVideoPlaying = true
+  @State private var isVideoPlaying = false
   @State private var videoCurrentTime: Double = 0
   @State private var videoDuration: Double = 0
   @State private var isScrubbing = false
@@ -4531,9 +4531,13 @@ private struct NativeSingleAssetPage: View {
                 .onTapGesture(perform: onTap)
                 .onAppear {
                   setupVideoObserver(for: player)
-                  if isActive {
+                  // Spec §3.4: videos start paused; only the play control
+                  // (or a re-visit while already playing) starts playback.
+                  if isActive && isVideoPlaying {
                     player.play()
-                    isVideoPlaying = true
+                  } else {
+                    player.pause()
+                    isVideoPlaying = false
                   }
                 }
                 .onDisappear {
@@ -4542,12 +4546,33 @@ private struct NativeSingleAssetPage: View {
                   removeVideoObserver()
                 }
 
+              // Spec §3.4: paused videos show a visible play affordance over
+              // the first frame instead of auto-playing.
+              if !isVideoPlaying, !isLoading {
+                Button {
+                  if videoCurrentTime >= videoDuration && videoDuration > 0 {
+                    player.seek(to: .zero)
+                  }
+                  player.play()
+                  isVideoPlaying = true
+                } label: {
+                  Image(systemName: "play.fill")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundColor(.white.opacity(0.95))
+                    .frame(width: 76, height: 76)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .shadow(radius: 8)
+                }
+                .accessibilityLabel("播放视频")
+                .contentShape(Circle())
+              }
+
               if showsControls {
                 videoControlsOverlay
               }
             }
-          } else {
-            VStack(spacing: 12) {
+        } else {
+          VStack(spacing: 12) {
               if isLoading { ProgressView().tint(.white) }
               else {
                 Text(loadError ?? "视频暂不可用").font(.caption).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center)
@@ -4609,9 +4634,13 @@ private struct NativeSingleAssetPage: View {
         player?.pause()
         isVideoPlaying = false
         stopLivePlayback()
-      } else if item.isVideo, let player {
+      } else if item.isVideo, let player, isVideoPlaying {
         player.play()
         isVideoPlaying = true
+      } else if item.isVideo, let player {
+        // Re-activating a paused video must not auto-play.
+        player.pause()
+        isVideoPlaying = false
       }
     }
     .onChange(of: isLivePhotoEnabled) { enabled in
@@ -4625,6 +4654,8 @@ private struct NativeSingleAssetPage: View {
       player?.pause()
       player = nil
       livePlayer = nil
+      // Swiping to a different video starts paused again (spec §3.4).
+      isVideoPlaying = false
       await loadAssetContent()
     }
     .onDisappear {
