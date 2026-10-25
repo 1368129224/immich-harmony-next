@@ -1774,11 +1774,7 @@ struct NativePhotosView: View {
 
                         Button(role: .destructive) {
                           selectedIDs = [entry.id]
-                          if entry.server != nil && entry.local == nil {
-                            requestRemoteOnlyDeletion()
-                          } else {
-                            showDeleteConfirmation = true
-                          }
+                          showDeleteConfirmation = true
                         } label: {
                           Label("删除", systemImage: "trash")
                         }
@@ -2151,11 +2147,7 @@ struct NativePhotosView: View {
               batchActionButton("plus.rectangle.on.folder", label: "加入相册", disabled: !selectedItems.contains(where: { $0.server != nil || $0.local != nil })) { showAlbumTargetDialog = true }
               batchActionButton("square.and.arrow.down", label: "保存", disabled: !selectedItems.contains(where: { $0.server != nil })) { prepareSaveToDevice() }
               batchActionButton("trash", label: "删除", disabled: selectedIDs.isEmpty || isDeleting, destructive: true) {
-                if selectedItems.allSatisfy({ $0.server != nil && $0.local == nil }) {
-                  requestRemoteOnlyDeletion()
-                } else {
-                  showDeleteConfirmation = true
-                }
+                showDeleteConfirmation = true
               }
             }
             .padding(.horizontal, 24)

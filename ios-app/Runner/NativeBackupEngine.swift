@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 import Network
 import Photos
@@ -10,16 +11,16 @@ import UIKit
 /// 3. WiFi-only and network constraints with low-power mode awareness
 /// 4. Auto-upload tombstone protection (prevents re-uploading cloud-deleted media)
 @MainActor
-public final class NativeBackupEngine: ObservableObject {
-  public static let shared = NativeBackupEngine()
+final class NativeBackupEngine: ObservableObject {
+  static let shared = NativeBackupEngine()
 
-  @Published public private(set) var isRunning: Bool = false
-  @Published public private(set) var currentProgress: Double = 0.0 // 0.0 ~ 1.0
-  @Published public private(set) var currentAssetId: String?
-  @Published public private(set) var totalPendingCount: Int = 0
-  @Published public private(set) var completedCount: Int = 0
-  @Published public private(set) var statusMessage: String?
-  @Published public private(set) var lastError: String?
+  @Published private(set) var isRunning: Bool = false
+  @Published private(set) var currentProgress: Double = 0.0 // 0.0 ~ 1.0
+  @Published private(set) var currentAssetId: String?
+  @Published private(set) var totalPendingCount: Int = 0
+  @Published private(set) var completedCount: Int = 0
+  @Published private(set) var statusMessage: String?
+  @Published private(set) var lastError: String?
 
   private let networkMonitor = NWPathMonitor()
   private var isWifi: Bool = true
@@ -73,7 +74,7 @@ public final class NativeBackupEngine: ObservableObject {
 
   // MARK: - Lifecycle & Execution
 
-  public func cancel() {
+  func cancel() {
     currentTask?.cancel()
     currentTask = nil
     isRunning = false
@@ -81,7 +82,7 @@ public final class NativeBackupEngine: ObservableObject {
   }
 
   /// Triggers an automatic backup pass on candidate device assets
-  public func triggerBackupPass(
+  func triggerBackupPass(
     assets: [NativeDeviceAsset],
     client: NativeImmichClient,
     force: Bool = false
@@ -349,7 +350,7 @@ public final class NativeBackupEngine: ObservableObject {
     options.isNetworkAccessAllowed = false
 
     return await withTaskCancellationHandler(operation: {
-      await withCheckedContinuation { continuation in
+      await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
         box.requestId = PHAssetResourceManager.default().requestData(
           for: resource,
           options: options,

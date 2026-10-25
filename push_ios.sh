@@ -25,11 +25,18 @@ bash "$ROOT/scripts/build_ios_lib.sh" "$CONFIG"
 
 # 2. Build native Xcode project
 echo "🔨 [1/3] 正在编译原生项目 ($CONFIG)..."
+
+# Prioritize generic destination for reliable build artifacts across wireless/wired device state
+DEST_SPEC="generic/platform=iOS"
+if xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" 2>/dev/null | grep -q "id:.*$DEVICE_NAME"; then
+  DEST_SPEC="platform=iOS,name=$DEVICE_NAME"
+fi
+
 XCODEBUILD_ARGS=(
   -project "$PROJECT"
   -scheme "$SCHEME"
   -configuration "$CONFIG"
-  -destination "platform=iOS,name=$DEVICE_NAME"
+  -destination "$DEST_SPEC"
   -derivedDataPath "$BUILD_DIR"
   -allowProvisioningUpdates
 )

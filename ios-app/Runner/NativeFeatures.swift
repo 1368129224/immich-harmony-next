@@ -3402,11 +3402,7 @@ private struct NativeAlbumDetail: View {
           Spacer()
 
           Button(role: .destructive) {
-            if selectedTargets.allSatisfy({ $0.server != nil && $0.local == nil }) {
-              requestRemoteOnlyDeletion()
-            } else {
-              showDeleteConfirmation = true
-            }
+            showDeleteConfirmation = true
           } label: {
             Image(systemName: "trash")
               .font(.system(size: 21, weight: .regular))
