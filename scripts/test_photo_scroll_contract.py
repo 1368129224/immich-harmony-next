@@ -42,6 +42,22 @@ class PhotoScrollContractTests(unittest.TestCase):
         self.assertIn("animated && index == 0 ? 300_000_000 : 40_000_000", source)
         self.assertIn(".easeInOut(duration: 0.25)", source)
 
+    def test_viewer_dismiss_gesture_prevents_horizontal_paging_conflict(self):
+        source = (ROOT / "ios-app/Runner/NativeImmichApp.swift").read_text()
+        surface = source.split("private struct NativeViewerDismissHelper", 1)[1].split(
+            "func nativeViewerVisibleSourceFrame", 1
+        )[0]
+        # Must require the horizontal paging pan gesture to fail when dismiss pan begins
+        self.assertIn("paging.panGestureRecognizer.require(toFail: pan)", surface)
+        self.assertIn("shouldBeRequiredToFailBy", surface)
+        self.assertIn("shouldRecognizeSimultaneouslyWith", surface)
+        # Must reset in-flight offset to page boundary
+        self.assertIn("sv.setContentOffset", surface)
+        self.assertIn("round(currentX / width) * width", surface)
+        # Must not use simultaneous DragGesture on the pager
+        self.assertNotIn("simultaneousGesture(\n          DragGesture", surface)
+
+
 
 if __name__ == "__main__":
     unittest.main()

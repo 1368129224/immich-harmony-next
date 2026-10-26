@@ -3554,10 +3554,220 @@ private extension UIView {
 
 // Keep per-frame gesture updates out of the gallery's asset/page state.
 // Only scale the pager for the final thumbnail dismissal animation.
-private enum NativeViewerDragDirection {
-  case undetermined
-  case draggingDown
-  case swipingUp
+private final class NativeViewerDismissFinderView: UIView {
+  var onSetup: ((UIView) -> Void)?
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil {
+      onSetup?(self)
+    }
+  }
+}
+
+private struct NativeViewerDismissHelper: UIViewRepresentable {
+  let isZoomed: Bool
+  let isFinishing: Bool
+  let onDragChanged: (CGFloat) -> Void
+  let onDragEnded: (CGFloat, CGFloat) -> Void
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(
+      isZoomed: isZoomed,
+      isFinishing: isFinishing,
+      onDragChanged: onDragChanged,
+      onDragEnded: onDragEnded
+    )
+  }
+
+  func makeUIView(context: Context) -> NativeViewerDismissFinderView {
+    let view = NativeViewerDismissFinderView()
+    view.backgroundColor = .clear
+    view.isUserInteractionEnabled = false
+    view.onSetup = { [weak coordinator = context.coordinator] v in
+      coordinator?.setup(from: v)
+    }
+    DispatchQueue.main.async {
+      context.coordinator.setup(from: view)
+    }
+    return view
+  }
+
+  func updateUIView(_ uiView: NativeViewerDismissFinderView, context: Context) {
+    context.coordinator.isZoomed = isZoomed
+    context.coordinator.isFinishing = isFinishing
+    context.coordinator.onDragChanged = onDragChanged
+    context.coordinator.onDragEnded = onDragEnded
+    context.coordinator.setup(from: uiView)
+  }
+
+  static func dismantleUIView(_ uiView: NativeViewerDismissFinderView, coordinator: Coordinator) {
+    uiView.onSetup = nil
+    coordinator.detach()
+  }
+
+  final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    var isZoomed: Bool
+    var isFinishing: Bool
+    var onDragChanged: (CGFloat) -> Void
+    var onDragEnded: (CGFloat, CGFloat) -> Void
+
+    private weak var panGesture: UIPanGestureRecognizer?
+    private weak var pagingScrollView: UIScrollView?
+    private weak var targetView: UIView?
+
+    init(
+      isZoomed: Bool,
+      isFinishing: Bool,
+      onDragChanged: @escaping (CGFloat) -> Void,
+      onDragEnded: @escaping (CGFloat, CGFloat) -> Void
+    ) {
+      self.isZoomed = isZoomed
+      self.isFinishing = isFinishing
+      self.onDragChanged = onDragChanged
+      self.onDragEnded = onDragEnded
+    }
+
+    func setup(from view: UIView) {
+      guard let paging = findPagingScrollView(from: view) else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak view] in
+          guard let self = self, let view = view else { return }
+          self.setup(from: view)
+        }
+        return
+      }
+      let target = paging.superview ?? paging
+      if self.pagingScrollView === paging && self.targetView === target && self.panGesture != nil {
+        return
+      }
+      detach()
+
+      self.pagingScrollView = paging
+      self.targetView = target
+
+      let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+      pan.maximumNumberOfTouches = 1
+      pan.delegate = self
+      pan.cancelsTouchesInView = true
+      target.addGestureRecognizer(pan)
+      paging.panGestureRecognizer.require(toFail: pan)
+      self.panGesture = pan
+    }
+
+    func detach() {
+      if let pan = panGesture, let view = pan.view {
+        view.removeGestureRecognizer(pan)
+      }
+      panGesture = nil
+      pagingScrollView = nil
+      targetView = nil
+    }
+
+    private func findPagingScrollView(from view: UIView) -> UIScrollView? {
+      var responder: UIResponder? = view
+      while let r = responder {
+        if let pvc = r as? UIPageViewController {
+          if let sv = findPagingScrollViewIn(view: pvc.view) { return sv }
+        }
+        if let vc = r as? UIViewController {
+          for child in vc.children {
+            if let pvc = child as? UIPageViewController {
+              if let sv = findPagingScrollViewIn(view: pvc.view) { return sv }
+            }
+          }
+        }
+        responder = r.next
+      }
+
+      var root: UIView = view
+      while let p = root.superview { root = p }
+      return findPagingScrollViewIn(view: root)
+    }
+
+    private func findPagingScrollViewIn(view: UIView) -> UIScrollView? {
+      if let sv = view as? UIScrollView {
+        let isZoomScrollView = sv.tag == 100 || sv.maximumZoomScale > 1.0
+        let isPaging = sv.isPagingEnabled || String(describing: type(of: sv)).contains("Queuing")
+        if !isZoomScrollView && isPaging {
+          return sv
+        }
+      }
+      for sub in view.subviews {
+        if let found = findPagingScrollViewIn(view: sub) { return found }
+      }
+      return nil
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+      guard let view = gesture.view else { return }
+      let translation = gesture.translation(in: view)
+      let velocity = gesture.velocity(in: view)
+
+      switch gesture.state {
+      case .began:
+        // Cancel in-flight horizontal paging and lock offset to the current page boundary
+        if let sv = pagingScrollView {
+          sv.panGestureRecognizer.isEnabled = false
+          sv.panGestureRecognizer.isEnabled = true
+          let width = sv.bounds.width
+          if width > 0 {
+            let currentX = sv.contentOffset.x
+            let targetX = round(currentX / width) * width
+            if abs(currentX - targetX) > 0.5 {
+              sv.setContentOffset(CGPoint(x: targetX, y: sv.contentOffset.y), animated: false)
+            }
+          }
+        }
+        if translation.y > 0 {
+          onDragChanged(translation.y)
+        }
+      case .changed:
+        if translation.y > 0 {
+          onDragChanged(translation.y)
+        } else {
+          onDragChanged(0)
+        }
+      case .ended, .cancelled:
+        onDragEnded(translation.y, velocity.y)
+      default:
+        break
+      }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+      guard gestureRecognizer === panGesture else { return true }
+      guard !isZoomed, !isFinishing else { return false }
+      guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+      guard let view = pan.view else { return false }
+
+      let velocity = pan.velocity(in: view)
+      // Must be predominantly vertical (height component > width component * 1.3)
+      let isVertical = abs(velocity.y) > abs(velocity.x) * 1.3
+      guard isVertical else { return false }
+
+      return true
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      if otherGestureRecognizer === pagingScrollView?.panGestureRecognizer {
+        return true
+      }
+      return false
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      if otherGestureRecognizer === pagingScrollView?.panGestureRecognizer {
+        return false
+      }
+      return false
+    }
+  }
 }
 
 private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
@@ -3571,7 +3781,6 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
   let onDismiss: () -> Void
 
   @State private var dragY: CGFloat = 0
-  @State private var dragDirection: NativeViewerDragDirection = .undetermined
   @State private var dismissScaleX: CGFloat = 1
   @State private var dismissScaleY: CGFloat = 1
   @State private var dismissX: CGFloat = 0
@@ -3588,55 +3797,17 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
         .opacity(pagerOpacity)
         .scaleEffect(x: dismissScaleX, y: dismissScaleY)
         .offset(x: dismissX, y: dragY)
-        .simultaneousGesture(
-          DragGesture(minimumDistance: 8)
-            .onChanged { value in
-              guard !isZoomed, !finishing else { return }
-              let isVertical = abs(value.translation.height) > abs(value.translation.width) * 1.25
-              if dragDirection == .undetermined {
-                let action = nativeClassifyViewerVerticalSwipe(translation: value.translation, predictedEnd: value.predictedEndTranslation)
-                if action == .showDetails {
-                  dragDirection = .swipingUp
-                  return
-                }
-                if value.translation.height > 8 && isVertical {
-                  dragDirection = .draggingDown
-                } else {
-                  return
-                }
-              }
-              if dragDirection == .draggingDown {
-                dragY = max(0, value.translation.height)
-              }
+        .background(
+          NativeViewerDismissHelper(
+            isZoomed: isZoomed,
+            isFinishing: finishing,
+            onDragChanged: { y in
+              dragY = max(0, y)
+            },
+            onDragEnded: { translationY, velocityY in
+              handleDragEnded(translationY: translationY, velocityY: velocityY)
             }
-            .onEnded { value in
-              let currentDirection = dragDirection
-              dragDirection = .undetermined
-              guard !finishing else { return }
-              if isZoomed {
-                withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
-                return
-              }
-              let action = nativeClassifyViewerVerticalSwipe(translation: value.translation, predictedEnd: value.predictedEndTranslation)
-              if currentDirection == .swipingUp || action == .showDetails {
-                onSwipeUp?()
-                withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
-                return
-              }
-              if currentDirection == .draggingDown {
-                if action == .dismiss {
-                  finishDismiss(swipingDown: true)
-                } else {
-                  withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
-                    dragY = 0
-                  }
-                }
-              } else {
-                withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
-                  dragY = 0
-                }
-              }
-            }
+          )
         )
       if showsChrome && !finishing {
         chrome
@@ -3647,6 +3818,31 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
     .animation(.easeInOut(duration: 0.2), value: showsChrome)
     .onChange(of: dismissRequested) { requested in
       if requested { finishDismiss(swipingDown: false) }
+    }
+  }
+
+  private func handleDragEnded(translationY: CGFloat, velocityY: CGFloat) {
+    guard !finishing else { return }
+    if isZoomed {
+      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
+      return
+    }
+    let predictedEnd = CGSize(width: 0, height: translationY + velocityY * 0.2)
+    let action = nativeClassifyViewerVerticalSwipe(
+      translation: CGSize(width: 0, height: translationY),
+      predictedEnd: predictedEnd
+    )
+    if action == .showDetails {
+      onSwipeUp?()
+      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
+      return
+    }
+    if action == .dismiss {
+      finishDismiss(swipingDown: true)
+    } else {
+      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+        dragY = 0
+      }
     }
   }
 
