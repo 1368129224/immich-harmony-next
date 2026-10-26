@@ -57,6 +57,26 @@ class PhotoScrollContractTests(unittest.TestCase):
         # Must not use simultaneous DragGesture on the pager
         self.assertNotIn("simultaneousGesture(\n          DragGesture", surface)
 
+    def test_viewer_deletion_scenarios_contract(self):
+        source = (ROOT / "ios-app/Runner/NativeImmichApp.swift").read_text()
+        viewer = source.split("struct NativeUnifiedGalleryViewer", 1)[1]
+
+        # 1. Remote only: displays "回收站", has "不再提醒" checkbox for trash
+        self.assertIn('title: isRemoteOnly ? "回收站" : "删除"', viewer)
+        self.assertIn("showCloudTrashDialog", viewer)
+        self.assertIn("不再提醒", viewer)
+        self.assertIn("isSkipTrashReminderEnabled", viewer)
+
+        # 2. Both exist: confirms localOnly vs all
+        self.assertIn("showBothDeleteDialog", viewer)
+        self.assertIn("仅删除本地照片", viewer)
+        self.assertIn("全部删除", viewer)
+
+        # 3. Local only: warns not synced yet and deletes local
+        self.assertIn("showLocalOnlyDeleteDialog", viewer)
+        self.assertIn("尚未同步", viewer)
+        self.assertIn("删除本地照片", viewer)
+
 
 
 if __name__ == "__main__":

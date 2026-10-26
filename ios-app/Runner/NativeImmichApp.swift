@@ -2395,7 +2395,9 @@ struct NativePhotosView: View {
             onDeleteItem: { deletedItem, scope in
               let previousAssetIDs = cachedDayGroups.flatMap(\.assets).map(\.id)
               let fallbackID = nativeViewerNextSelectionID(deletingID: deletedItem.id, orderedIDs: previousAssetIDs)
-              if let sid = deletedItem.server?.id { model.removeAssets(ids: [sid]) }
+              if let sid = deletedItem.server?.id, scope != .localOnly {
+                model.removeAssets(ids: [sid])
+              }
               if let local = deletedItem.local {
                 cloud.forgetMatches(localIDs: Set([local.id]))
               }
@@ -3986,11 +3988,51 @@ struct NativeUnifiedGalleryViewer: View {
   @State private var viewerMessage: String?
   @State private var presentedController = NativeWeakControllerBox()
   @State private var shareItem: Any? = nil
-  @State private var showDeleteConfirmationDialog = false
+  @State private var showBothDeleteDialog = false
+  @State private var showLocalOnlyDeleteDialog = false
+  @State private var showCloudTrashDialog = false
+  @State private var dontRemindTrashSelected = false
   @State private var isDeletingItem = false
   @State private var deleteErrorMessage: String? = nil
   @State private var showShareOptionsDialog = false
   @State private var isSavingToDevice = false
+
+  private var isRemoteOnly: Bool {
+    currentItem?.server != nil && currentItem?.local == nil
+  }
+
+  private var isBoth: Bool {
+    currentItem?.server != nil && currentItem?.local != nil
+  }
+
+  private var isLocalOnly: Bool {
+    currentItem?.local != nil && currentItem?.server == nil
+  }
+
+  private var dontRemindTrashKey: String {
+    let identity = NativeSyncCacheStore.shared.identity ?? client.config.serverUrl
+    return "immich_dont_remind_cloud_trash_\(identity)"
+  }
+
+  private var isSkipTrashReminderEnabled: Bool {
+    UserDefaults.standard.bool(forKey: dontRemindTrashKey)
+  }
+
+  private func handleDeleteOrTrashTap() {
+    guard currentItem != nil else { return }
+    if isRemoteOnly {
+      if isSkipTrashReminderEnabled {
+        performDeleteItem(scope: .all)
+      } else {
+        dontRemindTrashSelected = false
+        showCloudTrashDialog = true
+      }
+    } else if isBoth {
+      showBothDeleteDialog = true
+    } else {
+      showLocalOnlyDeleteDialog = true
+    }
+  }
 
   init(
     client: NativeImmichClient,
@@ -4078,25 +4120,107 @@ struct NativeUnifiedGalleryViewer: View {
           }
         )
       }
+
+      if showCloudTrashDialog {
+        Color.black.opacity(0.4)
+          .ignoresSafeArea()
+          .contentShape(Rectangle())
+          .onTapGesture {
+            showCloudTrashDialog = false
+          }
+
+        VStack(spacing: 18) {
+          VStack(spacing: 8) {
+            Text("移入云端回收站")
+              .font(.headline)
+              .foregroundColor(.primary)
+
+            Text("确定将该照片移入云端回收站吗？稍后可在资料库回收站中查看或恢复。")
+              .font(.subheadline)
+              .foregroundColor(.secondary)
+              .multilineTextAlignment(.center)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+
+          Button {
+            dontRemindTrashSelected.toggle()
+          } label: {
+            HStack(spacing: 8) {
+              Image(systemName: dontRemindTrashSelected ? "checkmark.square.fill" : "square")
+                .font(.system(size: 18))
+                .foregroundColor(dontRemindTrashSelected ? .accentColor : .secondary)
+              Text("不再提醒")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+
+          Divider()
+            .padding(.horizontal, -20)
+
+          HStack(spacing: 0) {
+            Button("取消", role: .cancel) {
+              showCloudTrashDialog = false
+            }
+            .font(.system(size: 16))
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+
+            Divider()
+              .frame(height: 44)
+
+            Button(role: .destructive) {
+              if dontRemindTrashSelected {
+                UserDefaults.standard.set(true, forKey: dontRemindTrashKey)
+              }
+              showCloudTrashDialog = false
+              performDeleteItem(scope: .all)
+            } label: {
+              Text("放入回收站")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+          }
+        }
+        .padding(20)
+        .frame(maxWidth: 300)
+        .background(
+          RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color(uiColor: .systemBackground))
+        )
+        .shadow(color: Color.black.opacity(0.25), radius: 20, y: 10)
+        .transition(.scale(scale: 0.95).combined(with: .opacity))
+        .zIndex(100)
+      }
     }
+    .animation(.easeInOut(duration: 0.2), value: showCloudTrashDialog)
     .onAppear {
       presentedController.value?.setNeedsStatusBarAppearanceUpdate()
     }
     .onChange(of: showChrome) { _ in
       presentedController.value?.setNeedsStatusBarAppearanceUpdate()
     }
-    .confirmationDialog("删除照片", isPresented: $showDeleteConfirmationDialog, titleVisibility: .visible) {
-      Button("从所有位置删除", role: .destructive) {
-        performDeleteItem(scope: .all)
+    .confirmationDialog("删除照片", isPresented: $showBothDeleteDialog, titleVisibility: .visible) {
+      Button("仅删除本地照片", role: .destructive) {
+        performDeleteItem(scope: .localOnly)
       }
-      if currentItem?.local != nil && currentItem?.server == nil {
-        Button("仅删除本机照片", role: .destructive) {
-          performDeleteItem(scope: .localOnly)
-        }
+      Button("全部删除（本地和云端彻底删除）", role: .destructive) {
+        performDeleteItem(scope: .all)
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("确定要彻底删除该照片吗？")
+      Text("该照片在本地相册与云端均存在，请选择删除范围：")
+    }
+    .confirmationDialog("删除本地照片", isPresented: $showLocalOnlyDeleteDialog, titleVisibility: .visible) {
+      Button("删除本地照片", role: .destructive) {
+        performDeleteItem(scope: .localOnly)
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("该照片尚未同步到云端，删除后仅从本地设备相册中移除。")
     }
     .confirmationDialog("分享选项", isPresented: $showShareOptionsDialog, titleVisibility: .visible) {
       Button("分享原件（保留位置信息）") {
@@ -4289,13 +4413,11 @@ struct NativeUnifiedGalleryViewer: View {
               Image(systemName: "archivebox").font(.system(size: 19))
             }
 
-            // Delete
+            // Delete / Trash
             viewerActionButton(
-              title: "删除",
+              title: isRemoteOnly ? "回收站" : "删除",
               disabled: isDeletingItem || currentItem == nil,
-              action: {
-                showDeleteConfirmationDialog = true
-              }
+              action: handleDeleteOrTrashTap
             ) {
               Image(systemName: "trash").font(.system(size: 19))
             }
