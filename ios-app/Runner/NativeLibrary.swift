@@ -91,8 +91,17 @@ struct NativePeopleView: View {
       if !loading && people.isEmpty && error == nil { Text("暂无人物").foregroundColor(.secondary) }
       ForEach(people.indices, id: \.self) { index in
         if let id = people[index]["id"] as? String {
-          NavigationLink((people[index]["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "未命名") {
+          NavigationLink {
             NativeFilteredView(client: client, title: people[index]["name"] as? String ?? "人物", filter: ["personIds": ["any": [id]]])
+          } label: {
+            HStack(spacing: 12) {
+              Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+              Text((people[index]["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "未命名")
+                .font(.body)
+            }
+            .padding(.vertical, 2)
           }
         }
       }

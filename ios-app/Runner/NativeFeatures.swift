@@ -3484,65 +3484,110 @@ private struct NativeLibraryView: View {
   var body: some View {
     NavigationView {
       List {
-        Section("相册偏好") {
-          Toggle("合并本地和远端相册", isOn: $mergeAlbums)
-          NavigationLink("照片页") {
-            NativePhotosPageSettingsView(client: client, device: device)
+        Section("常用管理") {
+          NavigationLink {
+            NativePeopleView(client: client)
+          } label: {
+            Label("人物", systemImage: "person.2")
+          }
+
+          NavigationLink {
+            NativeFilteredView(client: client, title: "回收站", filter: ["trashedAt": ["ne": NSNull()]])
+          } label: {
+            Label("回收站", systemImage: "trash")
+          }
+
+          NavigationLink {
+            NativeFilteredView(client: client, title: "收藏", filter: ["isFavorite": ["eq": true]])
+          } label: {
+            Label("收藏", systemImage: "heart")
+          }
+
+          NavigationLink {
+            NativeFilteredView(client: client, title: "归档", filter: ["visibility": ["eq": "archive"]])
+          } label: {
+            Label("归档", systemImage: "archivebox")
           }
         }
-        Section("快捷入口") {
-          NavigationLink("收藏") { NativeFilteredView(client: client, title: "收藏", filter: ["isFavorite": ["eq": true]]) }
-          NavigationLink("归档") { NativeFilteredView(client: client, title: "归档", filter: ["visibility": ["eq": "archive"]]) }
-          NavigationLink("共享链接") {
-            NativeLibrarySection(client: client, title: "共享链接", path: "shared-links", query: []) { row in
-              guard let id = row["id"] as? String else { return nil }
-              return LibraryRow(id: id, title: row["description"] as? String ?? row["slug"] as? String ?? "共享链接", detail: row["type"] as? String ?? "", assetID: nil)
+
+        Section("集合与分类") {
+          NavigationLink {
+            NativePlacesView(client: client)
+          } label: {
+            Label("地点", systemImage: "mappin.and.ellipse")
+          }
+
+          NavigationLink {
+            if device.authorized {
+              NativeDeviceGrid(client: client, device: device, title: "本机照片", assets: device.assets)
+            } else {
+              Button("允许访问设备相册") { Task { await device.requestAccess() } }
             }
+          } label: {
+            Label("本机照片", systemImage: "iphone")
           }
-          if features["trash"] as? Bool == true {
-            NavigationLink("回收站") { NativeFilteredView(client: client, title: "回收站", filter: ["trashedAt": ["ne": NSNull()]]) }
-          }
-        }
-        Section("集合") {
-          if features["facialRecognition"] as? Bool != false { NavigationLink("人物") { NativePeopleView(client: client) } }
-          if features["map"] as? Bool != false { NavigationLink("地点") { NativePlacesView(client: client) } }
-          NavigationLink("本机") {
-            if device.authorized { NativeDeviceGrid(client: client, device: device, title: "本机照片", assets: device.assets) }
-            else { Button("允许访问设备相册") { Task { await device.requestAccess() } } }
-          }
-          NavigationLink("回忆") {
+
+          NavigationLink {
             NativeLibrarySection(client: client, title: "回忆", path: "memories", query: []) { row in
               guard let id = row["id"] as? String else { return nil }
               return LibraryRow(id: id, title: row["type"] as? String ?? "回忆", detail: row["memoryAt"] as? String ?? "", assetID: nil)
             }
+          } label: {
+            Label("回忆", systemImage: "sparkles")
+          }
+
+          NavigationLink {
+            NativeFoldersView(client: client)
+          } label: {
+            Label("服务器文件夹", systemImage: "folder")
           }
         }
-        Section("快捷访问") {
-          NavigationLink("服务器文件夹") { NativeFoldersView(client: client) }
-          NavigationLink("锁定文件夹 · 开发中") { NativeFallbackNote() }
-          NavigationLink("伙伴共享") {
+
+        Section("共享与访问") {
+          NavigationLink {
+            NativeLibrarySection(client: client, title: "共享链接", path: "shared-links", query: []) { row in
+              guard let id = row["id"] as? String else { return nil }
+              return LibraryRow(id: id, title: row["description"] as? String ?? row["slug"] as? String ?? "共享链接", detail: row["type"] as? String ?? "", assetID: nil)
+            }
+          } label: {
+            Label("共享链接", systemImage: "link")
+          }
+
+          NavigationLink {
             NativeLibrarySection(client: client, title: "伙伴共享", path: "partners", query: [URLQueryItem(name: "direction", value: "shared-by")]) { row in
               guard let id = row["id"] as? String else { return nil }
               return LibraryRow(id: id, title: row["name"] as? String ?? row["email"] as? String ?? "伙伴", detail: row["email"] as? String ?? "", assetID: nil)
             }
+          } label: {
+            Label("伙伴共享", systemImage: "person.crop.circle.badge.plus")
           }
-          NavigationLink("标签") {
+
+          NavigationLink {
             NativeLibrarySection(client: client, title: "标签", path: "tags", query: []) { row in
               guard let id = row["id"] as? String else { return nil }
               return LibraryRow(id: id, title: row["value"] as? String ?? row["name"] as? String ?? "标签", detail: "", assetID: id)
             }
+          } label: {
+            Label("标签", systemImage: "tag")
           }
         }
-        Section("应用更新") {
+
+        Section("相册与设置") {
+          Toggle("合并本地和远端相册", isOn: $mergeAlbums)
+          NavigationLink("照片页设置") {
+            NativePhotosPageSettingsView(client: client, device: device)
+          }
           NavigationLink {
             NativeAppUpdateView()
           } label: {
             Label("检查更新", systemImage: "arrow.down.app")
           }
         }
+
         Section("调试") {
           Button("后台诊断与错误记录") { showDebugSheet = true }
         }
+
         Section {
           HStack {
             Spacer()
@@ -3558,7 +3603,7 @@ private struct NativeLibraryView: View {
           .listRowBackground(Color.clear)
         }
       }
-      .navigationTitle("设置")
+      .navigationTitle("资源库")
       .sheet(isPresented: $showDebugSheet) {
         NativePerformanceDebugView(
           client: client, device: device,
@@ -4138,7 +4183,7 @@ struct NativeTabShell: View {
         .tabItem { Label("相册", systemImage: "rectangle.stack") }
         .tag(2)
       NativeLibraryView(client: client, device: device, matchedAssetDiagnostics: matchedAssetDiagnostics)
-        .tabItem { Label("设置", systemImage: "gearshape") }
+        .tabItem { Label("资源库", systemImage: "folder") }
         .tag(3)
     }
     .onAppear {
