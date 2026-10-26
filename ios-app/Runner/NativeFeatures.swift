@@ -1162,28 +1162,6 @@ struct NativeResultGrid: View {
                     startDragSelectionInSelectMode(startingWith: entry.id)
                   }
                 }
-                .simultaneousGesture(
-                  DragGesture(minimumDistance: 4, coordinateSpace: .named("resultGridScrollSpace"))
-                    .onChanged { drag in
-                      guard isSelecting, !isMagnifying else { return }
-                      if dragSelectionIntent == .undecided {
-                        let intent = nativeDragSelectionIntent(for: drag.translation)
-                        if intent != .undecided { dragSelectionIntent = intent }
-                      }
-                      guard dragSelectionIntent == .select else { return }
-                      if !isDragSelecting {
-                        guard let hitID = itemBounds.first(where: { $0.value.contains(drag.startLocation) })?.key else { return }
-                        isDragSelecting = true
-                        startDragSelectionInSelectMode(startingWith: hitID, at: drag.startLocation)
-                      }
-                      handle2DDragSelection(at: drag.location)
-                    }
-                    .onEnded { _ in
-                      isDragSelecting = false
-                      dragSelectionIntent = .undecided
-                      finishDragSelection()
-                    }
-                )
                 .id(entry.id)
               }
             }
@@ -2767,15 +2745,7 @@ private struct NativeAlbumsView: View {
   @State private var isLoading = false
 
   @State private var isSelecting = false
-  @State private var isDragSelecting = false
-  @State private var dragSelectionIntent: NativeDragSelectionIntent = .undecided
-  @State private var longPressDragIntent: NativeDragSelectionIntent = .undecided
   @State private var selectedAlbumIDs: Set<String> = []
-  @State private var itemBounds: [String: CGRect] = [:]
-  @State private var dragStartLocation: CGPoint? = nil
-  @State private var dragStartAlbumID: String? = nil
-  @State private var dragInitialSelectedIDs: Set<String> = []
-  @State private var dragSelectMode: Bool = true
   @State private var activeEntry: NativeAlbumEntry? = nil
   @State private var showCreateAlbum = false
   @State private var newAlbumName = ""
@@ -2878,9 +2848,8 @@ private struct NativeAlbumsView: View {
 
   var body: some View {
     NavigationView {
-      Group {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 16) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
           if let active = activeEntry {
             NavigationLink(
               destination: NativeAlbumDetail(client: client, device: device, entry: active, mergeAlbums: mergeAlbums),
@@ -2919,12 +2888,6 @@ private struct NativeAlbumsView: View {
                 isPinned: isEntryPinned(entry),
                 onTogglePin: { togglePin(for: entry) }
               )
-              .background(
-                GeometryReader { geo in
-                  Color.clear
-                    .preference(key: NativeItemFramePreferenceKey.self, value: [entry.id: geo.frame(in: .named("albumsScrollSpace"))])
-                }
-              )
               .contentShape(Rectangle())
               .onTapGesture {
                 if isSelecting {
@@ -2933,90 +2896,21 @@ private struct NativeAlbumsView: View {
                   activeEntry = entry
                 }
               }
-              .onLongPressGesture(minimumDuration: 0.28, maximumDistance: 15) {
+              .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 15) {
                 if !isSelecting {
                   enterAlbumSelection(startingWith: entry.id)
                 } else {
-                  startDragSelectionInAlbumMode(startingWith: entry.id)
+                  toggleAlbumSelection(entry.id)
                 }
               }
-              .simultaneousGesture(
-                DragGesture(minimumDistance: 4, coordinateSpace: .named("albumsScrollSpace"))
-                  .onChanged { drag in
-                    guard isSelecting else { return }
-                    if dragSelectionIntent == .undecided {
-                      let intent = nativeDragSelectionIntent(for: drag.translation)
-                      if intent != .undecided { dragSelectionIntent = intent }
-                    }
-                    guard dragSelectionIntent == .select else { return }
-                    if !isDragSelecting {
-                      guard let hitID = itemBounds.first(where: { $0.value.contains(drag.startLocation) })?.key else { return }
-                      isDragSelecting = true
-                      startDragSelectionInAlbumMode(startingWith: hitID, at: drag.startLocation)
-                    }
-                    handle2DDragSelection(at: drag.location)
-                  }
-                  .onEnded { _ in
-                    isDragSelecting = false
-                    dragSelectionIntent = .undecided
-                    finishDragSelection()
-                  }
-              )
               .id(entry.id)
             }
           }
           .padding(.horizontal, 16)
           .padding(.top, 8)
           .padding(.bottom, 24)
-          }
         }
       }
-      // Scroll/gesture modifiers live on a wrapper ABOVE the ScrollView so the
-      // drag-selection gesture chain never competes with the scroll view's pan
-      // recognizer (same layout as NativeResultGrid, which scrolls correctly).
-      .coordinateSpace(name: "albumsScrollSpace")
-      .nativeScrollDisabled(isDragSelecting)
-      .onPreferenceChange(NativeItemFramePreferenceKey.self) { frames in
-        itemBounds = frames
-      }
-      .simultaneousGesture(
-        LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
-          .sequenced(before: DragGesture(minimumDistance: 10, coordinateSpace: .named("albumsScrollSpace")))
-          .onChanged { value in
-            switch value {
-            case .first:
-              break
-            case .second(true, let drag):
-              if let drag = drag, longPressDragIntent == .undecided {
-                let intent = nativeDragSelectionIntent(for: drag.translation)
-                if intent != .undecided { longPressDragIntent = intent }
-              }
-              guard longPressDragIntent == .select else { break }
-              if !isDragSelecting {
-                isDragSelecting = true
-                let loc = drag?.startLocation ?? drag?.location
-                if let loc = loc,
-                   let hitID = itemBounds.first(where: { $0.value.contains(loc) })?.key {
-                  if !isSelecting {
-                    enterAlbumSelection(startingWith: hitID, at: loc)
-                  } else {
-                    startDragSelectionInAlbumMode(startingWith: hitID, at: loc)
-                  }
-                }
-              }
-              if let drag = drag {
-                handle2DDragSelection(at: drag.location)
-              }
-            default:
-              break
-            }
-          }
-        .onEnded { _ in
-          isDragSelecting = false
-          longPressDragIntent = .undecided
-          finishDragSelection()
-        }
-      )
       .navigationTitle("")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -3096,8 +2990,6 @@ private struct NativeAlbumsView: View {
   }
 
   private func reload() async {
-    isDragSelecting = false
-    finishDragSelection()
     isLoading = true
     defer { isLoading = false }
     do { serverAlbums = try await client.serverAlbums(); error = nil }
@@ -3125,15 +3017,11 @@ private struct NativeAlbumsView: View {
 
   private func deleteSelectedAlbums(includingAssets: Bool) async {
     guard !isMutating else { return }
-    isDragSelecting = false
-    finishDragSelection()
     let selected = entries.filter { selectedAlbumIDs.contains($0.id) }
     guard !selected.isEmpty else { return }
     isMutating = true
     defer {
       isMutating = false
-      isDragSelecting = false
-      finishDragSelection()
       device.refresh()
     }
     var failures: [String] = []
@@ -3178,92 +3066,11 @@ private struct NativeAlbumsView: View {
     }
   }
 
-  private func enterAlbumSelection(startingWith id: String, at location: CGPoint? = nil) {
+  private func enterAlbumSelection(startingWith id: String) {
     guard !isSelecting else { return }
     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     isSelecting = true
-    dragStartAlbumID = id
-    let startLoc = location ?? itemBounds[id].map { CGPoint(x: $0.midX, y: $0.midY) }
-    dragStartLocation = startLoc
-    dragInitialSelectedIDs = selectedAlbumIDs
-    let alreadySelected = selectedAlbumIDs.contains(id)
-    dragSelectMode = !alreadySelected
-    if dragSelectMode {
-      selectedAlbumIDs.insert(id)
-    } else {
-      selectedAlbumIDs.remove(id)
-    }
-  }
-
-  private func startDragSelectionInAlbumMode(startingWith id: String, at location: CGPoint? = nil) {
-    guard dragStartAlbumID != id || dragStartLocation == nil else { return }
-    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-    dragStartAlbumID = id
-    let startLoc = location ?? itemBounds[id].map { CGPoint(x: $0.midX, y: $0.midY) }
-    dragStartLocation = startLoc
-    dragInitialSelectedIDs = selectedAlbumIDs
-    let alreadySelected = selectedAlbumIDs.contains(id)
-    dragSelectMode = !alreadySelected
-    if dragSelectMode {
-      selectedAlbumIDs.insert(id)
-    } else {
-      selectedAlbumIDs.remove(id)
-    }
-  }
-
-  private func handle2DDragSelection(at location: CGPoint) {
-    guard isSelecting else { return }
-    if dragStartLocation == nil {
-      dragStartLocation = location
-      dragInitialSelectedIDs = selectedAlbumIDs
-      if let hitID = itemBounds.first(where: { $0.value.contains(location) })?.key {
-        dragStartAlbumID = hitID
-        dragSelectMode = !selectedAlbumIDs.contains(hitID)
-      } else {
-        dragSelectMode = true
-      }
-    }
-
-    let startLoc = dragStartLocation ?? location
-    let minX = min(startLoc.x, location.x)
-    let minY = min(startLoc.y, location.y)
-    let maxX = max(startLoc.x, location.x)
-    let maxY = max(startLoc.y, location.y)
-
-    let selectionRect = CGRect(
-      x: minX,
-      y: minY,
-      width: max(maxX - minX, 6),
-      height: max(maxY - minY, 6)
-    )
-
-    var itemsInRect = Set<String>()
-    for (id, frame) in itemBounds {
-      if frame.intersects(selectionRect) {
-        itemsInRect.insert(id)
-      }
-    }
-    if let startID = dragStartAlbumID {
-      itemsInRect.insert(startID)
-    }
-
-    var updated = dragInitialSelectedIDs
-    if dragSelectMode {
-      updated.formUnion(itemsInRect)
-    } else {
-      updated.subtract(itemsInRect)
-    }
-
-    if updated != selectedAlbumIDs {
-      UIImpactFeedbackGenerator(style: .light).impactOccurred()
-      selectedAlbumIDs = updated
-    }
-  }
-
-  private func finishDragSelection() {
-    dragStartLocation = nil
-    dragStartAlbumID = nil
-    dragInitialSelectedIDs.removeAll()
+    selectedAlbumIDs = [id]
   }
 
   private func toggleAlbumSelection(_ id: String) {
