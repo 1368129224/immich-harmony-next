@@ -3961,6 +3961,20 @@ private struct NativeViewerFilmstrip: View {
   }
 }
 
+private struct NativeAlertButtonStyle: ButtonStyle {
+  let isDestructive: Bool
+  let isCancel: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(size: 17, weight: isCancel ? .semibold : .regular))
+      .foregroundColor(isDestructive ? Color(uiColor: .systemRed) : Color.accentColor)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(configuration.isPressed ? Color(uiColor: .systemFill) : Color.clear)
+      .contentShape(Rectangle())
+  }
+}
+
 struct NativeUnifiedGalleryViewer: View {
   let client: NativeImmichClient
   let device: NativeDeviceLibrary
@@ -4129,69 +4143,73 @@ struct NativeUnifiedGalleryViewer: View {
             showCloudTrashDialog = false
           }
 
-        VStack(spacing: 18) {
-          VStack(spacing: 8) {
+        VStack(spacing: 0) {
+          VStack(spacing: 4) {
             Text("移入云端回收站")
-              .font(.headline)
+              .font(.system(size: 17, weight: .semibold))
               .foregroundColor(.primary)
+              .multilineTextAlignment(.center)
+              .padding(.top, 20)
+              .padding(.horizontal, 16)
 
             Text("确定将该照片移入云端回收站吗？稍后可在资料库回收站中查看或恢复。")
-              .font(.subheadline)
-              .foregroundColor(.secondary)
+              .font(.system(size: 13, weight: .regular))
+              .foregroundColor(Color(uiColor: .secondaryLabel))
               .multilineTextAlignment(.center)
-              .fixedSize(horizontal: false, vertical: true)
-          }
+              .lineSpacing(2)
+              .padding(.top, 4)
+              .padding(.horizontal, 16)
 
-          Button {
-            dontRemindTrashSelected.toggle()
-          } label: {
-            HStack(spacing: 8) {
-              Image(systemName: dontRemindTrashSelected ? "checkmark.square.fill" : "square")
-                .font(.system(size: 18))
-                .foregroundColor(dontRemindTrashSelected ? .accentColor : .secondary)
-              Text("不再提醒")
-                .font(.subheadline)
-                .foregroundColor(.primary)
+            Button {
+              dontRemindTrashSelected.toggle()
+            } label: {
+              HStack(spacing: 6) {
+                Image(systemName: dontRemindTrashSelected ? "checkmark.square.fill" : "square")
+                  .font(.system(size: 15, weight: .medium))
+                  .foregroundColor(dontRemindTrashSelected ? Color.accentColor : Color(uiColor: .tertiaryLabel))
+                Text("不再提醒")
+                  .font(.system(size: 13))
+                  .foregroundColor(Color(uiColor: .secondaryLabel))
+              }
+              .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .padding(.top, 10)
+            .padding(.bottom, 16)
           }
-          .buttonStyle(.plain)
 
-          Divider()
-            .padding(.horizontal, -20)
+          Rectangle()
+            .fill(Color(uiColor: .separator))
+            .frame(height: 0.5)
 
           HStack(spacing: 0) {
-            Button("取消", role: .cancel) {
+            Button("取消") {
               showCloudTrashDialog = false
             }
-            .font(.system(size: 16))
-            .foregroundColor(.primary)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .buttonStyle(NativeAlertButtonStyle(isDestructive: false, isCancel: true))
 
-            Divider()
-              .frame(height: 44)
+            Rectangle()
+              .fill(Color(uiColor: .separator))
+              .frame(width: 0.5, height: 44)
 
-            Button(role: .destructive) {
+            Button("放入回收站") {
               if dontRemindTrashSelected {
                 UserDefaults.standard.set(true, forKey: dontRemindTrashKey)
               }
               showCloudTrashDialog = false
               performDeleteItem(scope: .all)
-            } label: {
-              Text("放入回收站")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.red)
-                .frame(maxWidth: .infinity, minHeight: 44)
             }
+            .buttonStyle(NativeAlertButtonStyle(isDestructive: true, isCancel: false))
           }
+          .frame(height: 44)
         }
-        .padding(20)
-        .frame(maxWidth: 300)
+        .frame(width: 270)
         .background(
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Color(uiColor: .systemBackground))
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(.ultraThickMaterial)
         )
-        .shadow(color: Color.black.opacity(0.25), radius: 20, y: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.18), radius: 24, y: 8)
         .transition(.scale(scale: 0.95).combined(with: .opacity))
         .zIndex(100)
       }
