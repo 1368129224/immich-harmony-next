@@ -536,7 +536,7 @@ struct NativePlacesView: View {
   }
 }
 
-private struct NativeMapPin: Identifiable {
+struct NativeMapPin: Identifiable {
   let id: String
   let coordinate: CLLocationCoordinate2D
 }
