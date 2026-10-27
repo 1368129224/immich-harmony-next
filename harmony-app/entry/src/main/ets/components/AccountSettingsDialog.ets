@@ -1,5 +1,5 @@
 // AccountSettingsDialog.ets — ArkUI V2 Multi-Account Management & Settings Modal
-// Full compliance with DELETION_ACCOUNT_SHARING_SPEC Section 2 (Multi-server, Multi-account, Cache cleaning, Backup per-account)
+// Design reference: docs/AGENT_DESIGN_SPEC.md §8–9 (accounts, cache cleaning, per-account backup).
 import { AppBridge } from '../bridge/AppBridge';
 import { AccountInfo, BackupConfig } from '../models/AssetModels';
 

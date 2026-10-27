@@ -568,7 +568,7 @@ export struct TimelinePage {
     this.pendingStartIndex = -1;
   }
 
-  // --- Batch Operations (Spec 2.2 & 2.3 & DELETION_ACCOUNT_SHARING_SPEC) ---
+  // --- Batch Operations (docs/AGENT_DESIGN_SPEC.md §4–6) ---
 
   handleBatchShare(): void {
     const count = this.selectedAssetIds.size;

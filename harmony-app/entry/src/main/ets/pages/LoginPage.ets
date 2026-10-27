@@ -1,5 +1,5 @@
 // LoginPage.ets — ArkUI V2 Clean-Room Immich Login View
-// Fully compliant with APP_INTERACTION_SPEC Section 5.1 & DELETION_ACCOUNT_SHARING_SPEC Section 2:
+// Design reference: docs/AGENT_DESIGN_SPEC.md §8 (authentication and accounts).
 // Primary authentication: Email + Password; Advanced options: API Key.
 import { AppBridge } from '../bridge/AppBridge';
 

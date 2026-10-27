@@ -71,5 +71,8 @@ This repository contains a commercial-grade, clean-room native HarmonyOS NEXT (A
   - `crates/immich-ohos-napi`: Thin N-API bridge (<200 lines) with flat DTO boundary and primitive types via `ohos-rs`.
   - `scripts/build_ohos_so.sh`: Cross-compilation and automated binary sync script configured.
   - `harmony-app`: ArkUI V2 models (`@ObservedV2`, `@Trace`), toggleable `AppBridge` (`USE_MOCK_BRIDGE = true`), pages (`LoginPage`, `TimelinePage`, `AssetViewerPage`), and components (`DebugOverlay`, `FilmstripScrubber`, `ExifDrawer`).
+- [Documentation] `docs/` is consolidated into three maintained documents. Before implementation, read [Development Rules](docs/DEVELOPMENT_RULES.md), then [Agent Design Specification](docs/AGENT_DESIGN_SPEC.md); the human-facing summary is [Product & UI Overview](docs/PRODUCT_UI_OVERVIEW.md). The design specification distinguishes confirmed requirements, current implementation, and pending validation. iOS now has a native project and C-FFI bridge; earlier milestone notes above remain historical.
+- [iOS] `ios-app/Runner.xcodeproj`: SwiftUI/UIKit + PhotoKit; `crates/immich-ios-ffi` bridges `immich-core` through `ImmichCoreBridge.swift`. Free Rust-returned strings with `immich_ios_free_string`; keep blocking FFI/IO off the UI thread.
+- [iOS Verification] Run `python3 scripts/check_native_ios.py` and `python3 -m unittest discover -s scripts -p 'test_*.py'`; FFI changes also require `cargo test` and `bash scripts/build_ios_lib.sh release`. Xcode builds/tests require macOS (`.github/workflows/build-ios.yml`); Linux checks do not prove device behavior.
 
 

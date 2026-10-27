@@ -11,7 +11,7 @@ Android 原生客户端预留目录。目前仅建立目录与说明，尚未创
 
 ## 产品与设计
 
-遵循 [跨平台 UI 与交互策略](../docs/CROSS_PLATFORM_UX_STRATEGY.md)：统一产品语义与品牌，适配平台原生操作习惯。
+开发前阅读 [开发行为规范](../docs/DEVELOPMENT_RULES.md) 与 [Agent 详细设计规范](../docs/AGENT_DESIGN_SPEC.md)：统一产品语义与品牌，适配平台原生操作习惯。产品概览见 [功能与 UI 设计简案](../docs/PRODUCT_UI_OVERVIEW.md)。
 
 ## 合规
 
