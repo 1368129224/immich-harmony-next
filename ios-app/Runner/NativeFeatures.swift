@@ -800,7 +800,6 @@ extension NativeImmichClient {
       "orderBy": ["field": "fileCreatedAt", "direction": "desc"],
     ]
     if !terms.isEmpty { payload["filter"] = terms }
-    if terms["trashedAt"] != nil { payload["withDeleted"] = true }
     if let cursor { payload["cursor"] = cursor }
     let result = try await send(path: "search/metadata", method: "POST", body: payload)
     guard let page = result["assets"] as? [String: Any], let items = page["items"] as? [[String: Any]] else { throw NativeFeatureError.badResponse }
@@ -3528,27 +3527,15 @@ private struct NativeLibraryView: View {
           }
 
           NavigationLink {
-            NativeLibrarySection(client: client, title: "回忆", path: "memories", query: []) { row in
-              guard let id = row["id"] as? String else { return nil }
-              return LibraryRow(id: id, title: row["type"] as? String ?? "回忆", detail: row["memoryAt"] as? String ?? "", assetID: nil)
-            }
+            NativeMemoriesView(client: client)
           } label: {
             Label("回忆", systemImage: "sparkles")
-          }
-
-          NavigationLink {
-            NativeFoldersView(client: client)
-          } label: {
-            Label("服务器文件夹", systemImage: "folder")
           }
         }
 
         Section("共享与访问") {
           NavigationLink {
-            NativeLibrarySection(client: client, title: "共享链接", path: "shared-links", query: []) { row in
-              guard let id = row["id"] as? String else { return nil }
-              return LibraryRow(id: id, title: row["description"] as? String ?? row["slug"] as? String ?? "共享链接", detail: row["type"] as? String ?? "", assetID: nil)
-            }
+            NativeSharedLinksView(client: client)
           } label: {
             Label("共享链接", systemImage: "link")
           }
