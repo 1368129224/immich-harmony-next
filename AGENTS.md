@@ -52,6 +52,8 @@ This repository contains a commercial-grade, clean-room native HarmonyOS NEXT (A
    ~~~
 3. **UI Sandbox First (Windows DevEco Studio):**
    Keep `AppBridge.USE_MOCK_BRIDGE = true` in `harmony-app/entry/src/main/ets/bridge/AppBridge.ets` when iterating on UI layout or gestures. Expose spring/damping gesture parameters (`springResponse`, `springDamping`, `dismissThresholdVp`) to an on-screen `DebugOverlay` slider panel instead of guessing magic numbers.
+4. **Post-Push CI & LiveContainer Refresh (Mandatory):**
+   `git push` 后须等待 GitHub Actions 编译，若编译失败须修复直到编译成功；编译成功后运行 `bash scripts/update_livecontainer_ipa.sh` 拉取并刷新 LiveContainer 源。
 
 ## 4. Strict Technical Guardrails (Anti-Hallucination)
 - **Pure Rust TLS & Bundled SQLite:** In `crates/immich-core/Cargo.toml`, ALWAYS use `reqwest` with `default-features = false, features = ["json", "rustls-tls", "stream", "gzip"]` and `rusqlite` with `features = ["bundled"]`. **NEVER** introduce `openssl-sys` or system C library dependencies that break OpenHarmony cross-compilation.
