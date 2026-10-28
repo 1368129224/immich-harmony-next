@@ -426,9 +426,7 @@ final class NativeImmichClient {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: ["redirectUri": redirectUri])
     let (data, response) = try await nativeData(for: request)
-    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-      throw NativeAPIError.invalidResponse(http: (response as? HTTPURLResponse)?.statusCode ?? 0)
-    }
+    try Self.check(response: response, data: data)
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       throw NativeAPIError.invalidJSON("/oauth/config")
     }
@@ -448,7 +446,7 @@ final class NativeImmichClient {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: ["url": callbackUrl])
     let (data, response) = try await nativeData(for: request)
-    try check(response: response, data: data)
+    try Self.check(response: response, data: data)
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let token = json["accessToken"] as? String else {
       throw NativeAPIError.invalidJSON("/oauth/callback")
@@ -690,7 +688,7 @@ final class NativeImmichClient {
     if let cursor { payload["cursor"] = cursor }
     let result = try await send(path: "search/metadata", method: "POST", body: payload)
     guard let page = result["assets"] as? [String: Any], let items = page["items"] as? [[String: Any]] else {
-      throw NativeAPIError.invalidResponse(http: 0)
+      throw NativeAPIError.invalidResponse
     }
     return NativeSearchPage(assets: items.compactMap(Self.decodeAsset), next: page["nextCursor"] as? String)
   }
@@ -784,12 +782,16 @@ final class NativeImmichClient {
     if let key = config.apiKey { request.setValue(key, forHTTPHeaderField: "x-api-key") }
   }
 
-  private func check(response: URLResponse, data: Data) throws {
+  static func check(response: URLResponse, data: Data) throws {
     guard let http = response as? HTTPURLResponse else { throw NativeAPIError.invalidResponse }
     guard (200..<300).contains(http.statusCode) else {
       if http.statusCode == 401 || http.statusCode == 403 { throw NativeAPIError.unauthorized }
       throw NativeAPIError.http(http.statusCode, "")
     }
+  }
+
+  func check(response: URLResponse, data: Data) throws {
+    try Self.check(response: response, data: data)
   }
 
   nonisolated static func parseISODate(_ value: String) -> Date? {
@@ -976,6 +978,7 @@ private extension NativeSessionStore {
   }
 }
 
+@MainActor
 final class NativeOAuthSessionManager: NSObject, ASWebAuthenticationPresentationContextProviding {
   static let shared = NativeOAuthSessionManager()
 
