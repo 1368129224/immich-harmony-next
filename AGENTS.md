@@ -1,80 +1,60 @@
-# AGENTS.md — Immich HarmonyOS NEXT Native Client
+# AGENTS.md — Immich 原生多端客户端指南
 
-## 1. Project Overview & Architecture
-This repository contains a commercial-grade, clean-room native HarmonyOS NEXT (API 12+) client for **Immich**, built with a **Rust Cross-Platform Core (`immich-core`) + Thin N-API Bridge (`immich-ohos-napi`) + Pure ArkTS/ArkUI V2 (`harmony-app`)** architecture.
+## 1. 项目概览与架构
+本仓库为 **Immich** 的商用级原生客户端（支持 HarmonyOS NEXT API 12+ 与 iOS 15+），采用 **跨平台 Rust 核心 (`immich-core`) + 轻量 FFI 桥接 + 纯原生 UI** 架构。
 
-- **License Compliance (CRITICAL):** Immich official server/mobile is AGPLv3. This project is a **100% clean-room implementation** communicating strictly via HTTP REST APIs. **NEVER** copy, reference, or translate Dart/Flutter source code from the official Immich repository.
-- **Dual-Machine Workflow:**
-  - **Linux NAS (Backend & Core Host):** Develops and tests `crates/immich-core`, and runs `ohrs build` inside `crates/immich-ohos-napi` to cross-compile `.so` binaries (`x86_64` for Windows emulator, `arm64-v8a` for real device) and generate `index.d.ts`.
-  - **Windows PC (UI & Emulator Host):** Runs DevEco Studio to develop and debug `harmony-app` using the Previewer and x86_64 HarmonyOS NEXT Emulator.
+- **开源许可合规（极其重要）：** Immich 官方客户端为 AGPLv3。本项目为 **100% 洁室净室实现**，仅通过 HTTP REST API 通信。**严禁** 复制、参考或翻译官方 Flutter/Dart 源码。
+- **跨平台分工：**
+  - **Linux NAS（后端与核心）：** 开发测试 `immich-core`，执行 `immich-ohos-napi` 交叉编译生成 `.so`，执行 `immich-ios-ffi` 构建，监控 GitHub Actions CI 及更新本地 LiveContainer IPA 源。
+  - **Windows PC（鸿蒙 UI 与模拟器）：** 使用 DevEco Studio 开发调试 `harmony-app`。
+  - **MacBook（iOS 构建与真机）：** 执行 Xcode 编译、XCTest、签名与真机安装。
 
-## 2. Directory Structure
+## 2. 目录结构
 ~~~text
 .
-├── AGENTS.md                        # AI Agent constitution & workflow rules
-├── Cargo.toml                       # Rust workspace manifest
-├── .gitignore                       # Whitelists harmony-app/entry/libs/**/*.so for Git sync
-├── .gitattributes                   # Enforces LF line endings across Linux NAS & Windows PC
-├── scripts/
-│   └── build_ohos_so.sh             # Linux NAS one-click N-API build & copy script
+├── AGENTS.md                        # AI Agent 行为准则与工作流
+├── Cargo.toml                       # Rust workspace 配置
+├── scripts/                         # 跨平台构建、检查与发布脚本
 ├── crates/
-│   ├── immich-core/                 # Platform-agnostic Rust core (HTTP, Adapter, SQLite, Cache)
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── adapter.rs           # Dual-version API adapter (Columnar vs Legacy Array)
-│   │       ├── client.rs            # Reqwest rustls HTTP client & thumbnail downloader
-│   │       └── db.rs                # Bundled rusqlite local cache engine
-│   └── immich-ohos-napi/            # Thin N-API FFI bridge (<200 lines, ohos-rs)
-│       ├── Cargo.toml
-│       ├── build.rs
-│       └── src/lib.rs
-└── harmony-app/                     # DevEco Studio project root (HarmonyOS NEXT API 12+)
-    └── entry/
-        ├── libs/                    # Prebuilt .so libraries synced via Git from Linux NAS
-        └── src/main/ets/
-            ├── bridge/AppBridge.ets # Toggleable Mock/Native bridge (USE_MOCK_BRIDGE)
-            ├── models/AssetModels.ets # ArkUI V2 @ObservedV2 & @Trace models
-            ├── pages/               # LoginPage, TimelinePage, AssetViewerPage
-            └── components/          # FilmstripScrubber, ExifDrawer, DebugOverlay
+│   ├── immich-core/                 # 平台无关 Rust 核心（HTTP、缓存、SQLite、API 适配）
+│   ├── immich-ohos-napi/            # 鸿蒙 N-API 桥接
+│   └── immich-ios-ffi/              # iOS C-FFI 桥接
+├── harmony-app/                     # HarmonyOS NEXT 原生工程 (ArkUI V2)
+└── ios-app/                         # iOS 原生工程 (SwiftUI / PhotoKit)
 ~~~
 
-## 3. Mandatory Verification Loops (Self-Healing Rules)
-1. **Rust Core Check & Test (Linux NAS):**
-   After modifying any file in `crates/immich-core`, ALWAYS run:
+## 3. 必须执行的验证循环 (Mandatory Verification Loops)
+1. **Rust 核心测试：**
+   修改 `crates/` 后必须执行：
    ~~~bash
-   cargo test --package immich-core -- --nocapture
+   ~/.cargo/bin/cargo test --workspace
    ~~~
-2. **HarmonyOS N-API Cross-Compile (Linux NAS):**
-   After `immich-core` tests pass, build the `.so` binaries for Windows emulator (`x64`) and real device (`arm64`):
+2. **鸿蒙 N-API 编译：**
+   `immich-core` 验证通过后，为模拟器 (`x86_64`) 与真机 (`arm64`) 编译 `.so`：
    ~~~bash
    bash scripts/build_ohos_so.sh
    ~~~
-3. **UI Sandbox First (Windows DevEco Studio):**
-   Keep `AppBridge.USE_MOCK_BRIDGE = true` in `harmony-app/entry/src/main/ets/bridge/AppBridge.ets` when iterating on UI layout or gestures. Expose spring/damping gesture parameters (`springResponse`, `springDamping`, `dismissThresholdVp`) to an on-screen `DebugOverlay` slider panel instead of guessing magic numbers.
-4. **Post-Push CI & LiveContainer Refresh (Mandatory):**
+3. **iOS 本地合规与契约检查：**
+   修改 iOS 源码后在 Linux NAS 执行：
+   ~~~bash
+   python3 scripts/check_native_ios.py && python3 -m unittest discover -s scripts -p 'test_*.py'
+   ~~~
+4. **鸿蒙 UI 优先沙箱调试：**
+   在 `harmony-app/.../AppBridge.ets` 中保持 `USE_MOCK_BRIDGE = true` 进行快速手势调优。
+5. **推送后 CI 监控与 LiveContainer 源刷新（必须）：**
    `git push` 后须等待 GitHub Actions 编译，若编译失败须修复直到编译成功；编译成功后运行 `bash scripts/update_livecontainer_ipa.sh` 拉取并刷新 LiveContainer 源。
 
-## 4. Strict Technical Guardrails (Anti-Hallucination)
-- **Pure Rust TLS & Bundled SQLite:** In `crates/immich-core/Cargo.toml`, ALWAYS use `reqwest` with `default-features = false, features = ["json", "rustls-tls", "stream", "gzip"]` and `rusqlite` with `features = ["bundled"]`. **NEVER** introduce `openssl-sys` or system C library dependencies that break OpenHarmony cross-compilation.
-- **Thin FFI Boundary:** Across `immich-ohos-napi`, ONLY pass primitive types (`String`, `i64`, `f64`, `bool`) or flat `#[napi(object)]` structs (`init_core_engine`, `login_server`, `sync_and_get_buckets`, `fetch_bucket_assets_json`, `ensure_asset_cached`, `prepare_asset_viewer_bundle`).
-- **Sandbox File Path Delivery for Media:** Rust `immich-core` MUST download thumbnails (`size=thumbnail`), preview images (`size=preview`), and live-photo videos into the HarmonyOS app sandbox `cacheDir`, returning local file paths to ArkTS.
-- **Multi-Version Immich API Compatibility:** Route `/api/timeline/bucket` responses through an untagged enum `RawBucketResponse` (`#[serde(untagged)]`) supporting both modern columnar `{ id: [...], type: [...] }` and legacy object array `[{ id, type, ... }]`. Automatically fall back from `visibility=timeline&withPartners=true` to `size=MONTH&isArchived=false` on HTTP 400.
-- **HarmonyOS NEXT ArkUI V2 Only:**
-  - Use `@ComponentV2`, `@ObservedV2`, `@Trace`, `@Local`, `@Param`, `@Event`. Never mix legacy V1 `@State` or `@Prop` inside `@ComponentV2`.
-  - Use modular `@kit.*` imports ONLY (`@kit.MediaLibraryKit`, `@kit.CoreFileKit`, `@kit.ArkUI`).
-  - Synthesize Live Photos natively via `fileUri.getUriFromPath(sandboxPath)` and `await movingPhotoManager.createMovingPhoto(imageUri, videoUri)` rendered inside `MovingPhotoView`.
+## 4. 技术规范与红线 (Technical Guardrails)
+- **纯 Rust TLS 与内置 SQLite：** `immich-core` 必须使用 pure rustls (`default-features = false, features = ["json", "rustls-tls", "stream", "gzip"]`) 与 bundled rusqlite，严禁引入 `openssl-sys`。
+- **轻量 FFI 边界：** FFI 接口仅传递基本类型 (`String`, `i64`, `bool` 等) 或扁平结构体；iOS 端必须调用 `immich_ios_free_string` 释放 Rust 导出的 C 字符串；耗时 IO 与 FFI 调用严禁阻塞主线程。
+- **沙箱路径传递：** 缩略图、预览图和实况视频缓存在写入沙箱后返回本地路径供 UI 渲染。
+- **多版本 API 兼容：** 时间线桶响应支持现代 Columnar 与旧版对象数组自动降级解析。
+- **ArkUI V2 规范：** 仅使用 `@ComponentV2`、`@ObservedV2`、`@Trace`、`@Local`，模块化引入 `@kit.*`。
 
-## 5. Progress & Dynamic Agent Notes (Append-Only Zone)
-<!-- Agent: Append discovered server quirks, completed milestones, or schema migrations below this line. Do not delete sections 1-4. -->
-- [Init] Architecture specification locked. Ready to scaffold workspace crates and run initial unit tests.
-- [Milestone] Workspace crates and HarmonyOS project structure created.
-  - `crates/immich-core`: Dual-version adapter (columnar vs legacy), bundled rusqlite engine, pure rustls reqwest client, sandbox path cache delivery. All 8 unit tests passed.
-  - `crates/immich-ohos-napi`: Thin N-API bridge (<200 lines) with flat DTO boundary and primitive types via `ohos-rs`.
-  - `scripts/build_ohos_so.sh`: Cross-compilation and automated binary sync script configured.
-  - `harmony-app`: ArkUI V2 models (`@ObservedV2`, `@Trace`), toggleable `AppBridge` (`USE_MOCK_BRIDGE = true`), pages (`LoginPage`, `TimelinePage`, `AssetViewerPage`), and components (`DebugOverlay`, `FilmstripScrubber`, `ExifDrawer`).
-- [Documentation] `docs/` is consolidated into three maintained documents. Before implementation, read [Development Rules](docs/DEVELOPMENT_RULES.md), then [Agent Design Specification](docs/AGENT_DESIGN_SPEC.md); the human-facing summary is [Product & UI Overview](docs/PRODUCT_UI_OVERVIEW.md). The design specification distinguishes confirmed requirements, current implementation, and pending validation. iOS now has a native project and C-FFI bridge; earlier milestone notes above remain historical.
-- [iOS] `ios-app/Runner.xcodeproj`: SwiftUI/UIKit + PhotoKit; `crates/immich-ios-ffi` bridges `immich-core` through `ImmichCoreBridge.swift`. Free Rust-returned strings with `immich_ios_free_string`; keep blocking FFI/IO off the UI thread.
-- [iOS Verification] Run `python3 scripts/check_native_ios.py` and `python3 -m unittest discover -s scripts -p 'test_*.py'`; FFI changes also require `cargo test` and `bash scripts/build_ios_lib.sh release`. Xcode builds/tests require macOS (`.github/workflows/build-ios.yml`); Linux checks do not prove device behavior.
-
-
+## 5. 进度与备忘 (Append-Only Zone)
+<!-- Agent: 追加发现的服务端特性、已完成里程碑或架构变更 -->
+- [Init] 架构设计确定，创建核心工程与基础测试。
+- [Milestone] 核心 crates 与鸿蒙工程搭建完成，双版本适配器与 SQLite 缓存就绪。
+- [Documentation] 文档归拢为三份核心规范：[开发行为规范](docs/DEVELOPMENT_RULES.md)、[Agent 详细设计规范](docs/AGENT_DESIGN_SPEC.md) 与 [功能与 UI 设计简案](docs/PRODUCT_UI_OVERVIEW.md)。
+- [iOS] `ios-app`: 原生 SwiftUI/UIKit + PhotoKit，经 `immich-ios-ffi` 连接 Rust 核心；CI 产出无签名 IPA。
+- [iOS Verification] Linux 端运行 `python3 scripts/check_native_ios.py` 及契约单测；push 后自动触发 CI 构建并更新 LiveContainer 源。
