@@ -50,7 +50,7 @@ final class NativeBackupEngine: ObservableObject {
   // MARK: - Settings
 
   public var isBackupEnabled: Bool {
-    get { UserDefaults.standard.object(forKey: "backup_enabled") as? Bool ?? true }
+    get { UserDefaults.standard.object(forKey: "backup_enabled") as? Bool ?? false }
     set {
       UserDefaults.standard.set(newValue, forKey: "backup_enabled")
       if !newValue { cancel() }
@@ -121,14 +121,25 @@ final class NativeBackupEngine: ObservableObject {
     var candidates: [NativeDeviceAsset] = []
     let albumFilter = selectedAlbumIDs
 
+    guard !albumFilter.isEmpty else {
+      isRunning = false
+      statusMessage = "请先选择需要备份的手机相册"
+      return
+    }
+
+    var allowedLocalIDs = Set<String>()
+    let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: Array(albumFilter), options: nil)
+    collections.enumerateObjects { collection, _, _ in
+      let fetched = PHAsset.fetchAssets(in: collection, options: nil)
+      fetched.enumerateObjects { asset, _, _ in
+        allowedLocalIDs.insert(asset.localIdentifier)
+      }
+    }
+
     for asset in allAssets {
       if syncStore.isMatched(localId: asset.id) { continue }
       if bridge.isUploadTombstoned(localAssetId: asset.id) { continue }
-
-      // If user selected specific albums, filter
-      if !albumFilter.isEmpty {
-        // Assets without matching album membership are skipped
-      }
+      if !allowedLocalIDs.contains(asset.id) { continue }
 
       candidates.append(asset)
     }

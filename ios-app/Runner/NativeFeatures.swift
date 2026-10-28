@@ -482,6 +482,22 @@ final class NativeDeviceLibrary: NSObject, ObservableObject, PHPhotoLibraryChang
     }
   }
 
+  func removeAssets(_ assetIDs: [String], fromAlbum albumID: String) async -> Bool {
+    guard authorized, !assetIDs.isEmpty,
+          let collection = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject else { return false }
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: assetIDs, options: nil)
+    guard assets.count > 0 else { return false }
+    return await withCheckedContinuation { continuation in
+      PHPhotoLibrary.shared().performChanges({
+        guard let request = PHAssetCollectionChangeRequest(for: collection) else { return }
+        request.removeAssets(assets)
+      }) { [weak self] success, _ in
+        if success { DispatchQueue.main.async { self?.refresh() } }
+        continuation.resume(returning: success)
+      }
+    }
+  }
+
   func saveFilesToPhotos(_ urls: [URL]) async -> (saved: Int, failed: Int) {
     guard authorized, !urls.isEmpty else { return (0, urls.count) }
     var saved = 0
@@ -2753,11 +2769,12 @@ private struct NativeAlbumsView: View {
   @State private var showDeleteAssetsWarning = false
   @State private var showMutationError = false
   @State private var isMutating = false
+  @State private var albumColumns: Int = 2
+  @State private var gestureBaseColumns: Int? = nil
 
-  private let gridColumns = [
-    GridItem(.flexible(), spacing: 14),
-    GridItem(.flexible(), spacing: 14)
-  ]
+  private var dynamicGridColumns: [GridItem] {
+    Array(repeating: GridItem(.flexible(), spacing: 14), count: albumColumns)
+  }
 
   private var pinnedKeys: [String] {
     get {
@@ -2875,7 +2892,7 @@ private struct NativeAlbumsView: View {
             .padding(.horizontal)
           }
 
-          LazyVGrid(columns: gridColumns, spacing: 16) {
+          LazyVGrid(columns: dynamicGridColumns, spacing: 16) {
             ForEach(sortedEntries) { entry in
               NativeAlbumCard(
                 client: client,
@@ -2910,6 +2927,23 @@ private struct NativeAlbumsView: View {
           .padding(.bottom, 24)
         }
       }
+      .simultaneousGesture(
+        MagnificationGesture()
+          .onChanged { value in
+            guard !isSelecting else { return }
+            let base = gestureBaseColumns ?? albumColumns
+            if gestureBaseColumns == nil { gestureBaseColumns = base }
+            let delta = value >= 1 ? -(value - 1) * 3 : (1 / max(0.1, value) - 1) * 3
+            let target = min(4, max(2, Int((CGFloat(base) + delta).rounded())))
+            if target != albumColumns {
+              UIImpactFeedbackGenerator(style: .light).impactOccurred()
+              albumColumns = target
+            }
+          }
+          .onEnded { _ in
+            gestureBaseColumns = nil
+          }
+      )
       .navigationTitle("")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -3092,6 +3126,7 @@ private struct NativeAlbumDetail: View {
   @State private var isSelecting = false
   @State private var selectedIDs: Set<String> = []
   @State private var showDeleteConfirmation = false
+  @State private var showRemoveFromAlbumConfirmation = false
   @State private var showLocalDeleteWarning = false
   @State private var pendingDeleteScope: NativeDeleteTargetScope = .all
   @State private var deletionError: String?
@@ -3195,7 +3230,7 @@ private struct NativeAlbumDetail: View {
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if isSelecting {
-        HStack {
+        HStack(spacing: 16) {
           Button {
             triggerBatchShare()
           } label: {
@@ -3205,23 +3240,37 @@ private struct NativeAlbumDetail: View {
                 .frame(width: 28, height: 28)
             } else {
               Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 21, weight: .regular))
+                .font(.system(size: 20, weight: .regular))
             }
           }
           .disabled(selectedIDs.isEmpty || isPreparingBatchShare)
 
           Spacer()
 
+          Button {
+            showRemoveFromAlbumConfirmation = true
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "folder.badge.minus")
+              Text("移出相册")
+                .font(.system(size: 14, weight: .medium))
+            }
+          }
+          .disabled(selectedIDs.isEmpty || isDeleting)
+
           Button(role: .destructive) {
             showDeleteConfirmation = true
           } label: {
-            Image(systemName: "trash")
-              .font(.system(size: 21, weight: .regular))
-              .foregroundColor(selectedIDs.isEmpty || isDeleting ? .secondary : .red)
+            HStack(spacing: 4) {
+              Image(systemName: "trash")
+              Text("删除照片")
+                .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundColor(selectedIDs.isEmpty || isDeleting ? .secondary : .red)
           }
           .disabled(selectedIDs.isEmpty || isDeleting)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
       }
@@ -3232,14 +3281,22 @@ private struct NativeAlbumDetail: View {
     )) { payload in
       NativeActivityView(activityItems: payload.content)
     }
+    .confirmationDialog("从相册移出照片", isPresented: $showRemoveFromAlbumConfirmation, titleVisibility: .visible) {
+      Button("仅从当前相册移出", role: .destructive) {
+        Task { await removeSelectedFromAlbum() }
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("仅将照片从本相册移除，照片原件仍会保留在设备相册与云端。")
+    }
     .confirmationDialog("删除选中的 \(selectedIDs.count) 项照片", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-      Button("全部删除（本地与云端）", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all) } }
+      Button("全部删除（本地与云端彻底删除）", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all) } }
       if selectedTargets.contains(where: { $0.local != nil && $0.server == nil }) {
         Button("仅删除本地照片", role: .destructive) { Task { await deleteSelectedPhotos(scope: .localOnly) } }
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("确定要删除所选照片吗？操作将同步移除对应副本。")
+      Text("确定彻底删除所选照片吗？此操作将从设备相册及云端彻底删除照片原件，不仅是移出相册！")
     }
     .alert("本机删除确认", isPresented: $showLocalDeleteWarning) {
       Button("取消", role: .cancel) {}
@@ -3269,6 +3326,46 @@ private struct NativeAlbumDetail: View {
       !localAssetsToDisplay.contains { matched[$0.id] == server.id }
     }.map { NativeGridItem(server: $0, local: nil) }
     return items.filter { selectedIDs.contains($0.id) }
+  }
+
+  private func removeSelectedFromAlbum() async {
+    guard !isDeleting else { return }
+    let targets = selectedTargets
+    guard !targets.isEmpty else { return }
+    isDeleting = true
+    defer { isDeleting = false }
+
+    var errors: [String] = []
+
+    if let serverAlbum = entry.server {
+      let serverIDs = targets.compactMap { $0.server?.id }
+      if !serverIDs.isEmpty {
+        do {
+          try await client.removeAssetsFromAlbum(ids: serverIDs, albumID: serverAlbum.id)
+        } catch {
+          errors.append("云端移出失败：\(error.localizedDescription)")
+        }
+      }
+    }
+
+    if let localAlbum = entry.device {
+      let localIDs = targets.compactMap { $0.local?.id }
+      if !localIDs.isEmpty {
+        let ok = await device.removeAssets(localIDs, fromAlbum: localAlbum.id)
+        if !ok {
+          errors.append("本机相册移出失败：请检查照片权限")
+        }
+      }
+    }
+
+    selectedIDs.removeAll()
+    isSelecting = false
+    device.refresh()
+    if let id = entry.server?.id { await model.load(albumId: id, reset: true) }
+
+    if !errors.isEmpty {
+      deletionError = errors.joined(separator: "\n")
+    }
   }
 
   private func deleteSelectedPhotos(scope: NativeDeleteTargetScope = .all) async {
@@ -3491,7 +3588,7 @@ private struct NativeLibraryView: View {
           }
 
           NavigationLink {
-            NativeFilteredView(client: client, title: "回收站", filter: ["trashedAt": ["ne": NSNull()]])
+            NativeTrashManagementView(client: client)
           } label: {
             Label("回收站", systemImage: "trash")
           }
@@ -3524,6 +3621,12 @@ private struct NativeLibraryView: View {
             }
           } label: {
             Label("本机照片", systemImage: "iphone")
+          }
+
+          NavigationLink {
+            NativeRecentlyAddedView(client: client, device: device)
+          } label: {
+            Label("最近添加", systemImage: "clock.arrow.circlepath")
           }
 
           NavigationLink {
@@ -3963,6 +4066,285 @@ struct NativeFilteredView: View {
   }
 }
 
+struct NativeRecentlyAddedView: View {
+  let client: NativeImmichClient
+  @ObservedObject var device: NativeDeviceLibrary
+  @State private var serverAssets: [NativeAsset] = []
+  @State private var localAssets: [NativeDeviceAsset] = []
+  @State private var nextCursor: String?
+  @State private var isLoading = false
+  @State private var error: String?
+  @State private var loaded = false
+
+  var body: some View {
+    VStack {
+      if let error {
+        HStack {
+          Text(error).font(.caption).foregroundColor(.red)
+          Button("重试") { Task { await reload() } }.font(.caption)
+        }
+        .padding(6)
+      }
+      NativeResultGrid(
+        client: client,
+        assets: serverAssets,
+        localAssets: localAssets,
+        hasOlder: nextCursor != nil,
+        startsAtLatest: false
+      ) {
+        Task { await loadMore() }
+      }
+      if isLoading { ProgressView().padding(8) }
+    }
+    .navigationTitle("最近添加")
+    .task {
+      if !loaded {
+        loaded = true
+        await reload()
+      }
+    }
+    .refreshable {
+      await reload()
+    }
+  }
+
+  private func reload() async {
+    isLoading = true
+    defer { isLoading = false }
+    error = nil
+    localAssets = device.assets.sorted { $0.date > $1.date }
+    do {
+      let page = try await client.recentlyAddedPage()
+      serverAssets = page.assets
+      nextCursor = page.next
+    } catch {
+      self.error = error.localizedDescription
+    }
+  }
+
+  private func loadMore() async {
+    guard let cursor = nextCursor, !isLoading else { return }
+    isLoading = true
+    defer { isLoading = false }
+    do {
+      let page = try await client.recentlyAddedPage(cursor: cursor)
+      var ids = Set(serverAssets.map(\.id))
+      serverAssets += page.assets.filter { ids.insert($0.id).inserted }
+      nextCursor = page.assets.isEmpty || page.next == cursor ? nil : page.next
+    } catch {
+      self.error = error.localizedDescription
+    }
+  }
+}
+
+struct NativeTrashManagementView: View {
+  let client: NativeImmichClient
+  @State private var assets: [NativeAsset] = []
+  @State private var selectedIDs: Set<String> = []
+  @State private var isSelecting = false
+  @State private var isLoading = false
+  @State private var isProcessing = false
+  @State private var nextCursor: String?
+  @State private var showEmptyConfirm = false
+  @State private var showPermanentDeleteConfirm = false
+  @State private var errorMessage: String?
+  @State private var loaded = false
+
+  var body: some View {
+    VStack(spacing: 0) {
+      if let errorMessage {
+        HStack {
+          Text(errorMessage).font(.caption).foregroundColor(.red)
+          Button("重试") { Task { await reload() } }.font(.caption)
+        }
+        .padding(6)
+      }
+      NativeResultGrid(
+        client: client,
+        assets: assets,
+        hasOlder: nextCursor != nil,
+        startsAtLatest: false,
+        isSelecting: $isSelecting,
+        selectedIDs: $selectedIDs
+      ) {
+        Task { await loadMore() }
+      }
+      if isLoading || isProcessing { ProgressView().padding(8) }
+    }
+    .navigationTitle(isSelecting ? "" : "回收站")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .navigationBarLeading) {
+        if isSelecting {
+          Button("取消") {
+            isSelecting = false
+            selectedIDs.removeAll()
+          }
+        }
+      }
+      ToolbarItem(placement: .principal) {
+        if isSelecting {
+          Text("已选 \(selectedIDs.count) 项").font(.headline)
+        }
+      }
+      ToolbarItemGroup(placement: .navigationBarTrailing) {
+        if isSelecting {
+          Button("全选") {
+            selectedIDs = Set(assets.map { "server:\($0.id)" })
+          }
+        } else {
+          Button("清空") {
+            showEmptyConfirm = true
+          }
+          .disabled(assets.isEmpty || isProcessing)
+          Button("选择") {
+            isSelecting = true
+          }
+          .disabled(assets.isEmpty || isProcessing)
+        }
+      }
+    }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if isSelecting {
+        HStack {
+          Button {
+            Task { await restoreSelected() }
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "arrow.uturn.backward.circle")
+              Text("恢复")
+                .font(.system(size: 15, weight: .semibold))
+            }
+          }
+          .disabled(selectedIDs.isEmpty || isProcessing)
+
+          Spacer()
+
+          Button(role: .destructive) {
+            showPermanentDeleteConfirm = true
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "trash")
+              Text("彻底删除")
+                .font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundColor(selectedIDs.isEmpty || isProcessing ? .secondary : .red)
+          }
+          .disabled(selectedIDs.isEmpty || isProcessing)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+      }
+    }
+    .confirmationDialog("清空回收站", isPresented: $showEmptyConfirm, titleVisibility: .visible) {
+      Button("清空回收站", role: .destructive) {
+        Task { await performEmptyTrash() }
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("确定清空回收站吗？回收站中的所有照片将被永久删除，无法撤销。")
+    }
+    .confirmationDialog("彻底删除所选照片", isPresented: $showPermanentDeleteConfirm, titleVisibility: .visible) {
+      Button("彻底删除", role: .destructive) {
+        Task { await performPermanentDelete() }
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("确定彻底删除选中的 \(selectedIDs.count) 项照片吗？此操作无法撤销。")
+    }
+    .task {
+      if !loaded {
+        loaded = true
+        await reload()
+      }
+    }
+    .refreshable {
+      await reload()
+    }
+  }
+
+  private var targetServerIDs: [String] {
+    selectedIDs.compactMap { id -> String? in
+      if id.hasPrefix("server:") {
+        return String(id.dropFirst(7))
+      }
+      return id
+    }
+  }
+
+  private func reload() async {
+    isLoading = true
+    defer { isLoading = false }
+    errorMessage = nil
+    do {
+      let page = try await client.searchPage(cursor: nil, filter: ["trashedAt": ["ne": NSNull()]])
+      assets = page.assets
+      nextCursor = page.next
+    } catch {
+      self.errorMessage = "加载回收站失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func loadMore() async {
+    guard let cursor = nextCursor, !isLoading else { return }
+    isLoading = true
+    defer { isLoading = false }
+    do {
+      let page = try await client.searchPage(cursor: cursor, filter: ["trashedAt": ["ne": NSNull()]])
+      var ids = Set(assets.map(\.id))
+      assets += page.assets.filter { ids.insert($0.id).inserted }
+      nextCursor = page.assets.isEmpty || page.next == cursor ? nil : page.next
+    } catch {
+      self.errorMessage = error.localizedDescription
+    }
+  }
+
+  private func restoreSelected() async {
+    let ids = targetServerIDs
+    guard !ids.isEmpty, !isProcessing else { return }
+    isProcessing = true
+    defer { isProcessing = false }
+    do {
+      try await client.restoreTrash(ids: ids)
+      selectedIDs.removeAll()
+      isSelecting = false
+      await reload()
+    } catch {
+      self.errorMessage = "恢复失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func performPermanentDelete() async {
+    let ids = targetServerIDs
+    guard !ids.isEmpty, !isProcessing else { return }
+    isProcessing = true
+    defer { isProcessing = false }
+    do {
+      try await client.deletePermanently(ids: ids)
+      selectedIDs.removeAll()
+      isSelecting = false
+      await reload()
+    } catch {
+      self.errorMessage = "彻底删除失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func performEmptyTrash() async {
+    guard !isProcessing else { return }
+    isProcessing = true
+    defer { isProcessing = false }
+    do {
+      try await client.emptyTrash()
+      assets.removeAll()
+      selectedIDs.removeAll()
+      isSelecting = false
+    } catch {
+      self.errorMessage = "清空回收站失败：\(error.localizedDescription)"
+    }
+  }
+}
+
 final class TabBarFinderView: UIView {
   var onSetup: ((UIView) -> Void)?
 
@@ -4163,11 +4545,11 @@ struct NativeTabShell: View {
       NativePhotosView(client: client, device: device, onLogout: onLogout, matchedAssetDiagnostics: matchedAssetDiagnostics)
         .tabItem { Label("照片", systemImage: "photo.on.rectangle") }
         .tag(0)
-      NativeSearchView(client: client, device: device)
-        .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-        .tag(1)
       NativeAlbumsView(client: client, device: device)
         .tabItem { Label("相册", systemImage: "rectangle.stack") }
+        .tag(1)
+      NativeSearchView(client: client, device: device)
+        .tabItem { Label("搜索", systemImage: "magnifyingglass") }
         .tag(2)
       NativeLibraryView(client: client, device: device, matchedAssetDiagnostics: matchedAssetDiagnostics)
         .tabItem { Label("资源库", systemImage: "folder") }

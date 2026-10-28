@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Combine
 import CryptoKit
 import Foundation
@@ -415,6 +416,62 @@ final class NativeImmichClient {
     return config
   }
 
+  static func fetchOAuthConfig(server: String, redirectUri: String) async throws -> (enabled: Bool, url: String?, buttonText: String?) {
+    let endpoint = try await discover(server)
+    guard let url = URL(string: "\(endpoint)/oauth/config") else {
+      throw NativeAPIError.invalidServer
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: ["redirectUri": redirectUri])
+    let (data, response) = try await nativeData(for: request)
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+      throw NativeAPIError.invalidResponse(http: (response as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw NativeAPIError.invalidJSON("/oauth/config")
+    }
+    let enabled = json["enabled"] as? Bool ?? false
+    let authUrl = json["url"] as? String
+    let buttonText = json["buttonText"] as? String
+    return (enabled, authUrl, buttonText)
+  }
+
+  static func oauthCallback(server: String, callbackUrl: String) async throws -> NativeServerConfig {
+    let endpoint = try await discover(server)
+    guard let url = URL(string: "\(endpoint)/oauth/callback") else {
+      throw NativeAPIError.invalidServer
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: ["url": callbackUrl])
+    let (data, response) = try await nativeData(for: request)
+    try check(response: response, data: data)
+    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let token = json["accessToken"] as? String else {
+      throw NativeAPIError.invalidJSON("/oauth/callback")
+    }
+    let userId = json["userId"] as? String
+    let userEmail = json["userEmail"] as? String
+    let userName = json["name"] as? String
+    var config = NativeServerConfig(
+      serverUrl: normalize(server),
+      apiEndpoint: endpoint,
+      accessToken: token,
+      apiKey: nil,
+      deviceId: nil,
+      userId: userId,
+      userEmail: userEmail,
+      userName: userName
+    )
+    if config.userId == nil {
+      config.userId = try? await NativeImmichClient(config: config).verifiedUserID()
+    }
+    return config
+  }
+
   func verifiedUserID() async throws -> String {
     let response = try await send(path: "users/me")
     guard let id = response["id"] as? String, !id.isEmpty else { throw NativeAPIError.invalidResponse }
@@ -609,6 +666,51 @@ final class NativeImmichClient {
       throw NativeAPIError.invalidJSON("/albums/{id}/assets")
     }
     return results
+  }
+
+  func removeAssetsFromAlbum(ids: [String], albumID: String) async throws {
+    guard !ids.isEmpty else { return }
+    let base = config.apiEndpoint ?? (Self.normalize(config.serverUrl) + "/api")
+    guard let url = URL(string: base + "/albums/\(albumID)/assets") else { throw NativeAPIError.invalidServer }
+    var request = URLRequest(url: url)
+    request.httpMethod = "DELETE"
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: ["ids": ids])
+    applyAuth(to: &request)
+    let (data, response) = try await nativeData(for: request, using: session)
+    try check(response: response, data: data)
+  }
+
+  func recentlyAddedPage(cursor: String? = nil) async throws -> NativeSearchPage {
+    var payload: [String: Any] = [
+      "size": 100,
+      "orderBy": ["field": "createdAt", "direction": "desc"],
+    ]
+    if let cursor { payload["cursor"] = cursor }
+    let result = try await send(path: "search/metadata", method: "POST", body: payload)
+    guard let page = result["assets"] as? [String: Any], let items = page["items"] as? [[String: Any]] else {
+      throw NativeAPIError.invalidResponse(http: 0)
+    }
+    return NativeSearchPage(assets: items.compactMap(Self.decodeAsset), next: page["nextCursor"] as? String)
+  }
+
+  func restoreTrash(ids: [String]) async throws {
+    guard !ids.isEmpty else { return }
+    do {
+      _ = try await send(path: "trash/restore", method: "POST", body: ["ids": ids])
+    } catch {
+      _ = try await send(path: "trash/restore/assets", method: "POST", body: ["ids": ids])
+    }
+  }
+
+  func emptyTrash() async throws {
+    _ = try await send(path: "trash/empty", method: "POST")
+  }
+
+  func deletePermanently(ids: [String]) async throws {
+    guard !ids.isEmpty else { return }
+    _ = try await send(path: "assets", method: "DELETE", body: ["ids": ids, "force": true])
   }
 
   func assetInfo(id: String) async throws -> [String: Any] {
@@ -874,6 +976,43 @@ private extension NativeSessionStore {
   }
 }
 
+final class NativeOAuthSessionManager: NSObject, ASWebAuthenticationPresentationContextProviding {
+  static let shared = NativeOAuthSessionManager()
+
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    for scene in scenes {
+      if let window = scene.windows.first(where: { $0.isKeyWindow }) {
+        return window
+      }
+    }
+    return ASPresentationAnchor()
+  }
+
+  @MainActor
+  func authenticate(authURL: URL, callbackScheme: String) async throws -> URL {
+    try await withCheckedThrowingContinuation { continuation in
+      let session = ASWebAuthenticationSession(
+        url: authURL,
+        callbackURLScheme: callbackScheme
+      ) { callbackURL, error in
+        if let error = error {
+          continuation.resume(throwing: error)
+        } else if let callbackURL = callbackURL {
+          continuation.resume(returning: callbackURL)
+        } else {
+          continuation.resume(throwing: NativeAPIError.invalidServer)
+        }
+      }
+      session.presentationContextProvider = self
+      session.prefersEphemeralWebBrowserSession = false
+      if !session.start() {
+        continuation.resume(throwing: NativeAPIError.invalidServer)
+      }
+    }
+  }
+}
+
 private struct NativeLoginView: View {
   let error: String?
   let onLogin: (NativeServerConfig) -> Void
@@ -953,6 +1092,20 @@ private struct NativeLoginView: View {
           }
           .disabled(busy || server.isEmpty || (useAPIKey ? apiKey.isEmpty : email.isEmpty || password.isEmpty))
         }
+
+        Section(header: Text("单点登录")) {
+          Button {
+            Task { await loginWithOAuth() }
+          } label: {
+            HStack {
+              Spacer()
+              Image(systemName: "person.badge.key")
+              Text("使用 OAuth / SSO 登录")
+              Spacer()
+            }
+          }
+          .disabled(busy || server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
       }
       .navigationTitle("Immich")
     }
@@ -977,6 +1130,43 @@ private struct NativeLoginView: View {
       onLogin(value)
     } catch {
       loginError = error.localizedDescription
+    }
+  }
+
+  @MainActor private func loginWithOAuth() async {
+    let trimmedServer = server.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedServer.isEmpty else {
+      loginError = "请先输入 Immich 服务器地址。"
+      return
+    }
+    busy = true
+    loginError = nil
+    defer { busy = false }
+    let redirectScheme = "immich"
+    let redirectUri = "\(redirectScheme)://oauth-callback"
+    do {
+      let config = try await NativeImmichClient.fetchOAuthConfig(server: trimmedServer, redirectUri: redirectUri)
+      guard config.enabled, let authUrlStr = config.url, let authUrl = URL(string: authUrlStr) else {
+        loginError = "当前服务器未启用或未配置 OAuth 单点登录服务。"
+        return
+      }
+      let callbackURL = try await NativeOAuthSessionManager.shared.authenticate(authURL: authUrl, callbackScheme: redirectScheme)
+      let value = try await NativeImmichClient.oauthCallback(server: trimmedServer, callbackUrl: callbackURL.absoluteString)
+      try NativeSessionStore.save(value)
+      NativeSyncCacheStore.shared.configure(server: value.serverUrl, userId: value.userId)
+      NativeBackgroundDiagnostics.shared.configureForCurrentAccount()
+      if let key = value.accessToken {
+        _ = try? await ImmichCoreBridge.shared.initializeCoreEngine()
+        _ = try? await ImmichCoreBridge.shared.loginServer(serverUrl: value.serverUrl, apiKey: key)
+      }
+      onLogin(value)
+    } catch {
+      if (error as NSError).domain == ASWebAuthenticationSessionErrorDomain,
+         (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+        loginError = nil
+      } else {
+        loginError = "OAuth 登录失败：\(error.localizedDescription)"
+      }
     }
   }
 }
@@ -1256,7 +1446,7 @@ struct NativePhotosView: View {
   private let accountIdentity: String?
   @StateObject private var model: NativeTimelineModel
   @StateObject private var cloud = NativeCloudStatus()
-  @State private var columns: Int = 5
+  @State private var columns: Int = 4
   @State private var gestureBaseColumns: Int? = nil
   @State private var gestureAnchorID: String?
   @State private var loadingMatchedServerIDs = Set<String>()
@@ -2747,7 +2937,7 @@ struct NativePhotosView: View {
       case "年": columns = 7
       case "月": columns = 5
       case "日": columns = 4
-      default: columns = 5
+      default: columns = 4
       }
     }
     guard isInitialTimelineVisible else { return } // Cold-start positioning owns its own scroll.
@@ -4010,6 +4200,9 @@ struct NativeUnifiedGalleryViewer: View {
   @State private var deleteErrorMessage: String? = nil
   @State private var showShareOptionsDialog = false
   @State private var isSavingToDevice = false
+  @State private var showAlbumTargetDialog = false
+  @State private var showLocalAlbumPicker = false
+  @State private var showServerAlbumPicker = false
 
   private var isRemoteOnly: Bool {
     currentItem?.server != nil && currentItem?.local == nil
@@ -4240,21 +4433,27 @@ struct NativeUnifiedGalleryViewer: View {
     } message: {
       Text("该照片尚未同步到云端，删除后仅从本地设备相册中移除。")
     }
-    .confirmationDialog("分享选项", isPresented: $showShareOptionsDialog, titleVisibility: .visible) {
-      Button("分享原件（保留位置信息）") {
-        executeShare(removeGPS: false, cloudLinkOnly: false)
+    .confirmationDialog("选择分享方式", isPresented: $showShareOptionsDialog, titleVisibility: .visible) {
+      Button("原件（保留 GPS 位置）") {
+        executeShare(format: .original, removeGPS: false)
       }
-      Button("分享安全副本（去除 GPS 定位）") {
-        executeShare(removeGPS: true, cloudLinkOnly: false)
+      Button("原件（去除 GPS 位置）") {
+        executeShare(format: .original, removeGPS: true)
       }
-      if let server = currentItem?.server {
+      Button("兼容副本 JPEG（保留 GPS 位置）") {
+        executeShare(format: .compatible, removeGPS: false)
+      }
+      Button("兼容副本 JPEG（去除 GPS 位置）") {
+        executeShare(format: .compatible, removeGPS: true)
+      }
+      if currentItem?.server != nil {
         Button("复制云端访问链接") {
-          executeShare(removeGPS: false, cloudLinkOnly: true)
+          executeShare(format: .cloudLink, removeGPS: false)
         }
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("请选择分享格式。去除 GPS 定位后将生成无敏感地理坐标的脱敏副本。")
+      Text("请选择分享原件、兼容副本或云端链接。可按需去除 GPS 地理位置以保护隐私。")
     }
     .alert("删除失败", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
       Button("确定", role: .cancel) { deleteErrorMessage = nil }
@@ -4288,6 +4487,25 @@ struct NativeUnifiedGalleryViewer: View {
       set: { if $0 == nil { shareItem = nil } }
     )) { payload in
       NativeActivityView(activityItems: payload.content)
+    }
+    .confirmationDialog("选择相册来源", isPresented: $showAlbumTargetDialog, titleVisibility: .visible) {
+      if currentItem?.local != nil {
+        Button("加入本机相册") { showLocalAlbumPicker = true }
+      }
+      if currentItem?.server != nil {
+        Button("加入云端相册") { showServerAlbumPicker = true }
+      }
+      Button("取消", role: .cancel) {}
+    } message: { Text("本机资产和云端资产分别操作，不会自动上传。") }
+    .sheet(isPresented: $showLocalAlbumPicker) {
+      NativePhotosLocalAlbumPicker(albums: device.albums) { albumID in
+        Task { await addCurrentItemToLocalAlbum(albumID) }
+      }
+    }
+    .sheet(isPresented: $showServerAlbumPicker) {
+      NativePhotosServerAlbumPicker(client: client) { albumID in
+        Task { await addCurrentItemToServerAlbum(albumID) }
+      }
     }
     .statusBarHidden(!showChrome)
   }
@@ -4419,6 +4637,15 @@ struct NativeUnifiedGalleryViewer: View {
               action: { showInfoSheet = true }
             ) {
               Image(systemName: "info.circle").font(.system(size: 19))
+            }
+
+            // Add to Album
+            viewerActionButton(
+              title: "加入相册",
+              disabled: currentItem == nil,
+              action: { showAlbumTargetDialog = true }
+            ) {
+              Image(systemName: "plus.rectangle.on.folder").font(.system(size: 19))
             }
 
             // Archive (directly shown)
@@ -4587,11 +4814,13 @@ struct NativeUnifiedGalleryViewer: View {
     }
   }
 
-  private func executeShare(removeGPS: Bool, cloudLinkOnly: Bool) {
+  private func executeShare(format: NativeShareFormatMode, removeGPS: Bool) {
     guard let item = currentItem, !isPreparingShare else { return }
-    if cloudLinkOnly, let server = item.server {
-      // Create or format cloud link
-      let base = client.config.apiEndpoint ?? (NativeImmichClient.normalize(client.config.serverUrl) + "/api")
+    if format == .cloudLink {
+      guard let server = item.server else {
+        viewerMessage = "该照片尚未同步到云端，无法生成云端链接，需先手动备份或分享本地副本。"
+        return
+      }
       let shareUrl = "\(client.config.serverUrl)/photos/\(server.id)"
       UIPasteboard.general.string = shareUrl
       viewerMessage = "云端照片链接已复制到剪贴板：\n\(shareUrl)"
@@ -4627,8 +4856,10 @@ struct NativeUnifiedGalleryViewer: View {
           throw NativeShareError.originalUnavailable
         }
 
-        // Apply GPS stripping if requested
-        if removeGPS {
+        // Apply format conversion or GPS stripping
+        if format == .compatible {
+          fileURL = (try? nativeCompatibleCopy(for: fileURL, removeGPS: removeGPS)) ?? fileURL
+        } else if removeGPS {
           fileURL = (try? nativeStripGPSFromImageFile(at: fileURL)) ?? fileURL
         }
 
@@ -4670,6 +4901,31 @@ struct NativeUnifiedGalleryViewer: View {
       }
     } catch {
       viewerMessage = "下载原件失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func addCurrentItemToServerAlbum(_ albumID: String) async {
+    guard let server = currentItem?.server else {
+      viewerMessage = "当前照片无云端副本，无法加入云端相册。"
+      return
+    }
+    do {
+      _ = try await client.addAssetsToAlbum(ids: [server.id], albumID: albumID)
+      viewerMessage = "已加入云端相册！"
+    } catch {
+      viewerMessage = "加入云端相册失败：\(error.localizedDescription)"
+    }
+  }
+
+  private func addCurrentItemToLocalAlbum(_ albumID: String) async {
+    guard let local = currentItem?.local else {
+      viewerMessage = "当前照片无本机副本，无法加入本机相册。"
+      return
+    }
+    if await device.addAssets([local.id], toAlbum: albumID) {
+      viewerMessage = "已加入本机相册！"
+    } else {
+      viewerMessage = "加入本机相册失败；请检查照片权限。"
     }
   }
 }
@@ -4740,6 +4996,41 @@ struct NativeBatchShareResult {
 
 /// Helper function to strip GPS coordinates from an image file (JPEG/HEIC/PNG)
 /// Creates a sanitized copy in temporaryDirectory without GPS metadata
+enum NativeShareFormatMode {
+  case original
+  case compatible
+  case cloudLink
+}
+
+func nativeCompatibleCopy(for sourceURL: URL, removeGPS: Bool) throws -> URL {
+  guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
+    return sourceURL
+  }
+  let destinationURL = FileManager.default.temporaryDirectory
+    .appendingPathComponent("\(UUID().uuidString)_compat.\(removeGPS ? "nogps.jpg" : "jpg")")
+  guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, "public.jpeg" as CFString, 1, nil) else {
+    return sourceURL
+  }
+  let count = CGImageSourceGetCount(source)
+  if count > 0 {
+    if let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+      var sanitized = metadata
+      if removeGPS {
+        sanitized.removeValue(forKey: kCGImagePropertyGPSDictionary)
+      }
+      CGImageDestinationAddImageFromSource(destination, source, 0, sanitized as CFDictionary)
+    } else {
+      CGImageDestinationAddImageFromSource(destination, source, 0, nil)
+    }
+  }
+  if CGImageDestinationFinalize(destination) {
+    return destinationURL
+  } else {
+    try? FileManager.default.removeItem(at: destinationURL)
+    return sourceURL
+  }
+}
+
 func nativeStripGPSFromImageFile(at sourceURL: URL) throws -> URL {
   guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
     return sourceURL
@@ -4836,6 +5127,7 @@ private struct NativeSingleAssetPage: View {
   @State private var livePhoto: PHLivePhoto?
   @State private var livePlayer: AVPlayer?
   @State private var isLivePlaying = false
+  @State private var liveResourceMissing = false
 
   // 视频播放与进度控制
   @State private var isVideoPlaying = false
@@ -4867,13 +5159,9 @@ private struct NativeSingleAssetPage: View {
                 .onTapGesture(perform: onTap)
                 .onAppear {
                   setupVideoObserver(for: player)
-                  // Spec §3.4: videos start paused; only the play control
-                  // (or a re-visit while already playing) starts playback.
-                  if isActive && isVideoPlaying {
+                  if isActive {
                     player.play()
-                  } else {
-                    player.pause()
-                    isVideoPlaying = false
+                    isVideoPlaying = true
                   }
                 }
                 .onDisappear {
@@ -4957,6 +5245,24 @@ private struct NativeSingleAssetPage: View {
             .padding()
           }
         }
+
+        if liveResourceMissing && isLive {
+          VStack {
+            HStack(spacing: 6) {
+              Image(systemName: "exclamationmark.triangle.fill")
+              Text("实况动态资源暂不可用或缺失")
+                .font(.caption.weight(.medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.75))
+            .foregroundColor(.white)
+            .clipShape(Capsule())
+            .padding(.top, 64)
+            Spacer()
+          }
+          .allowsHitTesting(false)
+        }
       }
       .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 15, pressing: { pressing in
         if !pressing { stopLivePlayback() }
@@ -4970,13 +5276,9 @@ private struct NativeSingleAssetPage: View {
         player?.pause()
         isVideoPlaying = false
         stopLivePlayback()
-      } else if item.isVideo, let player, isVideoPlaying {
+      } else if item.isVideo, let player {
         player.play()
         isVideoPlaying = true
-      } else if item.isVideo, let player {
-        // Re-activating a paused video must not auto-play.
-        player.pause()
-        isVideoPlaying = false
       }
     }
     .onChange(of: isLivePhotoEnabled) { enabled in
@@ -4986,13 +5288,17 @@ private struct NativeSingleAssetPage: View {
     .task(id: "\(item.local?.id ?? "remote"):\(item.server?.id ?? "none")") {
       image = nil
       livePhoto = nil
+      liveResourceMissing = false
       removeVideoObserver()
       player?.pause()
       player = nil
       livePlayer = nil
-      // Swiping to a different video starts paused again (spec §3.4).
       isVideoPlaying = false
       await loadAssetContent()
+      if isActive && item.isVideo, let player {
+        player.play()
+        isVideoPlaying = true
+      }
     }
     .onDisappear {
       removeVideoObserver()
@@ -5115,7 +5421,12 @@ private struct NativeSingleAssetPage: View {
   }
 
   private func startLivePlayback() {
-    guard isActive, isLivePhotoEnabled, isLive, !item.isVideo, livePhoto != nil || livePlayer != nil else { return }
+    guard isActive, isLivePhotoEnabled, isLive, !item.isVideo else { return }
+    if livePhoto == nil && livePlayer == nil {
+      liveResourceMissing = true
+      UINotificationFeedbackGenerator().notificationOccurred(.warning)
+      return
+    }
     isLivePlaying = true
     livePlayer?.isMuted = isLivePhotoMuted
     livePlayer?.seek(to: .zero)
@@ -5200,7 +5511,10 @@ private struct NativeSingleAssetPage: View {
         liveOptions.isNetworkAccessAllowed = true
         PHImageManager.default().requestLivePhoto(for: source, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: liveOptions) { result, info in
           guard info?[PHImageResultIsDegradedKey] as? Bool != true else { return }
-          DispatchQueue.main.async { livePhoto = result }
+          DispatchQueue.main.async {
+            livePhoto = result
+            if result == nil { liveResourceMissing = true }
+          }
         }
       }
     } else if let server = item.server {
@@ -5216,6 +5530,8 @@ private struct NativeSingleAssetPage: View {
           }
           let videoAsset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": request.allHTTPHeaderFields ?? [:]])
           livePlayer = AVPlayer(playerItem: AVPlayerItem(asset: videoAsset))
+        } else {
+          liveResourceMissing = true
         }
       }
       if let url = client.originalURL(for: server) {
@@ -5962,10 +6278,11 @@ struct NativeSyncSettingsSheet: View {
   @ObservedObject private var backupEngine = NativeBackupEngine.shared
   @Environment(\.dismiss) private var dismiss
 
-  @AppStorage("backup_enabled") private var legacySyncEnabled = true
+  @AppStorage("backup_enabled") private var legacySyncEnabled = false
   @AppStorage("immichz_sync_enabled") private var syncEnabled = true
   @AppStorage("immichz_sync_wifi_only") private var wifiOnlySync = true
   @AppStorage("immichz_sync_wifi_only_video") private var wifiOnlySyncVideo = true
+  @State private var showNoAlbumAlert = false
 
   private var verifiedLocalOnlyCount: Int {
     device.assets.filter { cloud.checkedIDs.contains($0.id) && !cloud.failedVerificationIDs.contains($0.id) && cloud.matchedServerIDs[$0.id] == nil }.count
@@ -5978,10 +6295,16 @@ struct NativeSyncSettingsSheet: View {
   var body: some View {
     NavigationView {
       Form {
-        Section(header: Text("自动备份引擎"), footer: Text("支持原图与实况照片 (Live Photo) 双轨原子上传；开启后新照片将自动备份到 Immich 服务器。")) {
+        Section(header: Text("自动备份引擎"), footer: Text("支持原图与实况照片 (Live Photo) 双轨原子上传；开启后所选相册的新照片将自动备份到 Immich 服务器。")) {
           Toggle("开启自动备份", isOn: Binding(
             get: { backupEngine.isBackupEnabled },
-            set: { backupEngine.isBackupEnabled = $0 }
+            set: { enabled in
+              if enabled && backupEngine.selectedAlbumIDs.isEmpty {
+                showNoAlbumAlert = true
+              } else {
+                backupEngine.isBackupEnabled = enabled
+              }
+            }
           ))
 
           Toggle("仅在 Wi-Fi 下备份", isOn: Binding(
@@ -6008,7 +6331,11 @@ struct NativeSyncSettingsSheet: View {
             }
           } else {
             Button("立即执行备份") {
-              backupEngine.triggerBackupPass(assets: device.assets, client: client, force: true)
+              if backupEngine.selectedAlbumIDs.isEmpty {
+                showNoAlbumAlert = true
+              } else {
+                backupEngine.triggerBackupPass(assets: device.assets, client: client, force: true)
+              }
             }
             .disabled(!backupEngine.isBackupEnabled)
 
@@ -6016,6 +6343,36 @@ struct NativeSyncSettingsSheet: View {
               Text(msg)
                 .font(.caption)
                 .foregroundColor(.secondary)
+            }
+          }
+        }
+
+        Section(header: Text("备份相册选择"), footer: Text("请先勾选需要自动备份的本机相册。只有选中的相册内容才会自动备份到 Immich。")) {
+          if device.albums.isEmpty {
+            Text("未检测到本机相册或暂未获得相册权限")
+              .font(.caption)
+              .foregroundColor(.secondary)
+          } else {
+            ForEach(device.albums) { album in
+              HStack {
+                Text(album.name)
+                Spacer()
+                if backupEngine.selectedAlbumIDs.contains(album.id) {
+                  Image(systemName: "checkmark")
+                    .foregroundColor(.accentColor)
+                    .font(.subheadline.bold())
+                }
+              }
+              .contentShape(Rectangle())
+              .onTapGesture {
+                var current = backupEngine.selectedAlbumIDs
+                if current.contains(album.id) {
+                  current.remove(album.id)
+                } else {
+                  current.insert(album.id)
+                }
+                backupEngine.selectedAlbumIDs = current
+              }
             }
           }
         }
@@ -6083,6 +6440,11 @@ struct NativeSyncSettingsSheet: View {
         ToolbarItem(placement: .navigationBarTrailing) {
           Button("完成") { dismiss() }
         }
+      }
+      .alert("请先选择备份相册", isPresented: $showNoAlbumAlert) {
+        Button("好", role: .cancel) {}
+      } message: {
+        Text("请在“备份相册选择”中勾选至少一个手机相册，再开启自动备份。")
       }
     }
   }
