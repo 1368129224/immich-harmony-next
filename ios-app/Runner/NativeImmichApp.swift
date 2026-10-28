@@ -840,6 +840,48 @@ final class NativeImmichClient {
     }
   }
 
+  nonisolated static func formatViewerTopDateTitle(_ date: Date) -> (date: String, time: String) {
+    var calendar = Calendar.autoupdatingCurrent
+    calendar.timeZone = .autoupdatingCurrent
+    let now = Date()
+
+    let timeFormatter = DateFormatter()
+    timeFormatter.locale = Locale(identifier: "zh_CN")
+    timeFormatter.timeZone = .autoupdatingCurrent
+    timeFormatter.dateFormat = "HH:mm"
+    let timeStr = timeFormatter.string(from: date)
+
+    let weekdayFormatter = DateFormatter()
+    weekdayFormatter.locale = Locale(identifier: "zh_CN")
+    weekdayFormatter.timeZone = .autoupdatingCurrent
+    weekdayFormatter.dateFormat = "EEEE"
+    let weekdayStr = weekdayFormatter.string(from: date)
+
+    if calendar.isDateInToday(date) {
+      return ("今天", timeStr)
+    } else if calendar.isDateInYesterday(date) {
+      return ("昨天", timeStr)
+    }
+
+    let dayDiff = abs(calendar.dateComponents([.day], from: date, to: now).day ?? 100)
+    let isCurrentYear = calendar.isDate(date, equalTo: now, toGranularity: .year)
+    if dayDiff < 7 {
+      return (weekdayStr, timeStr)
+    } else if isCurrentYear {
+      let monthDayFormatter = DateFormatter()
+      monthDayFormatter.locale = Locale(identifier: "zh_CN")
+      monthDayFormatter.timeZone = .autoupdatingCurrent
+      monthDayFormatter.dateFormat = "M月d日"
+      return ("\(monthDayFormatter.string(from: date)) \(weekdayStr)", timeStr)
+    } else {
+      let fullFormatter = DateFormatter()
+      fullFormatter.locale = Locale(identifier: "zh_CN")
+      fullFormatter.timeZone = .autoupdatingCurrent
+      fullFormatter.dateFormat = "yyyy年M月d日"
+      return (fullFormatter.string(from: date), timeStr)
+    }
+  }
+
   nonisolated private static func parseDate(_ value: String) -> Date? {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -3985,7 +4027,7 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
 
   var body: some View {
     ZStack {
-      Color.black
+      (showsChrome ? Color(uiColor: .systemBackground) : Color.black)
         .opacity(backdropOpacity * max(0, 1 - Double(dragY / 320)))
         .ignoresSafeArea()
       pager
@@ -4099,12 +4141,13 @@ private struct NativeViewerFilmstrip: View {
                   Color.gray.opacity(0.3)
                 }
               }
-              .frame(width: 28, height: isCurrent ? 34 : 30)
+              .frame(width: 28, height: isCurrent ? 36 : 30)
               .clipped()
-              .clipShape(RoundedRectangle(cornerRadius: isCurrent ? 4 : 2))
+              .clipShape(RoundedRectangle(cornerRadius: isCurrent ? 5 : 3))
               .overlay(
-                RoundedRectangle(cornerRadius: isCurrent ? 4 : 2)
-                  .stroke(isCurrent ? Color.white : Color.clear, lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: isCurrent ? 5 : 3)
+                  .stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2)
+                  .shadow(color: isCurrent ? Color.black.opacity(0.25) : Color.clear, radius: 2)
               )
               .id(item.id)
               .contentShape(Rectangle())
@@ -4118,7 +4161,7 @@ private struct NativeViewerFilmstrip: View {
           }
           .padding(.horizontal, max(0, geometry.size.width / 2 - 30))
         }
-        .frame(height: 36)
+        .frame(height: 40)
         .highPriorityGesture(
           DragGesture(minimumDistance: 4)
             .onChanged { value in
@@ -4133,9 +4176,7 @@ private struct NativeViewerFilmstrip: View {
             }
             .onEnded { _ in dragStartIndex = nil }
         )
-        .background(Color.black.opacity(0.45))
-        .clipShape(Capsule())
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
         .onChange(of: currentAssetID) { newID in
           if dragStartIndex != nil {
             proxy.scrollTo(newID, anchor: .center)
@@ -4300,7 +4341,11 @@ struct NativeUnifiedGalleryViewer: View {
                 onZoomChanged: { zoomed in
                   if item.id == currentAssetID { isCurrentImageZoomed = zoomed }
                 },
-                onTap: { showChrome.toggle() }
+                onTap: {
+                  withAnimation(.easeInOut(duration: 0.25)) {
+                    showChrome.toggle()
+                  }
+                }
               )
               .tag(item.id)
               .ignoresSafeArea()
@@ -4515,191 +4560,224 @@ struct NativeUnifiedGalleryViewer: View {
 
   private var viewerChrome: some View {
     VStack {
-          // Top Bar
-          HStack {
+      // Top Bar (参考 iOS 原生相册：左圆返回 + 中胶囊日期时间 + 右圆更多)
+      HStack(alignment: .center, spacing: 12) {
+        Button {
+          dismissRequested = true
+        } label: {
+          Image(systemName: "chevron.left")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundColor(.primary)
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial)
+            .clipShape(Circle())
+            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+        }
+        .accessibilityLabel("返回")
+
+        if let item = currentItem, (item.local?.isLivePhoto == true || item.server?.livePhotoVideoId != nil) {
+          Menu {
             Button {
-              dismissRequested = true
+              isLivePhotoEnabled.toggle()
             } label: {
-              Image(systemName: "chevron.left")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(10)
-                .background(Color.black.opacity(0.4))
-                .clipShape(Circle())
+              Label(isLivePhotoEnabled ? "关闭实况" : "开启实况", systemImage: isLivePhotoEnabled ? "livephoto.slash" : "livephoto")
             }
-
-            if let item = currentItem, (item.local?.isLivePhoto == true || item.server?.livePhotoVideoId != nil) {
-              Menu {
-                Button {
-                  isLivePhotoEnabled.toggle()
-                } label: {
-                  Label(isLivePhotoEnabled ? "关闭实况" : "开启实况", systemImage: isLivePhotoEnabled ? "livephoto.slash" : "livephoto")
-                }
-                Button {
-                  isLivePhotoMuted.toggle()
-                } label: {
-                  Label(isLivePhotoMuted ? "开启声音" : "静音", systemImage: isLivePhotoMuted ? "speaker.wave.2" : "speaker.slash")
-                }
-              } label: {
-                HStack(spacing: 4) {
-                  Image(systemName: "livephoto")
-                  Text("实况")
-                    .font(.caption2.weight(.semibold))
-                  Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.black.opacity(0.4))
-                .clipShape(Capsule())
-                .foregroundColor(.white)
-              }
-            }
-
-            Spacer()
-
-            if let item = currentItem {
-              VStack(spacing: 2) {
-                Text(NativeImmichClient.formatChineseDate(item.date))
-                  .font(.subheadline.weight(.semibold))
-                  .foregroundColor(.white)
-                Text("\(currentIndex + 1) / \(items.count)")
-                  .font(.caption2)
-                  .foregroundColor(.white.opacity(0.75))
-              }
-            }
-
-            Spacer()
-
             Button {
-              showInfoSheet = true
+              isLivePhotoMuted.toggle()
             } label: {
-              Image(systemName: "info.circle")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(10)
-                .background(Color.black.opacity(0.4))
-                .clipShape(Circle())
+              Label(isLivePhotoMuted ? "开启声音" : "静音", systemImage: isLivePhotoMuted ? "speaker.wave.2" : "speaker.slash")
+            }
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "livephoto")
+              Text("实况")
+                .font(.caption2.weight(.semibold))
+              Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .bold))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .foregroundColor(.primary)
+            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+          }
+        }
+
+        Spacer()
+
+        if let item = currentItem {
+          let dateInfo = NativeImmichClient.formatViewerTopDateTitle(item.date)
+          Button {
+            showInfoSheet = true
+          } label: {
+            VStack(spacing: 2) {
+              Text(dateInfo.date)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary)
+              Text(dateInfo.time)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .frame(height: 44)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("\(dateInfo.date) \(dateInfo.time)")
+        }
+
+        Spacer()
+
+        Menu {
+          Button {
+            showAlbumTargetDialog = true
+          } label: {
+            Label("加入相册", systemImage: "plus.rectangle.on.folder")
+          }
+
+          if currentItem?.server != nil && currentItem?.local == nil {
+            Button {
+              Task { await saveCurrentServerAssetToDevice() }
+            } label: {
+              Label(isSavingToDevice ? "保存中..." : "存到相册", systemImage: "arrow.down.to.line")
+            }
+            .disabled(isSavingToDevice)
+          }
+
+          if currentItem?.server != nil {
+            Button {
+              Task { await archiveCurrentServerCopy() }
+            } label: {
+              Label("归档", systemImage: "archivebox")
             }
           }
-          .padding(.horizontal, 16)
-          .padding(.top, 8)
+        } label: {
+          Image(systemName: "ellipsis")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundColor(.primary)
+            .frame(width: 44, height: 44)
+            .background(.ultraThinMaterial)
+            .clipShape(Circle())
+            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+        }
+        .accessibilityLabel("更多操作")
+      }
+      .padding(.horizontal, 16)
+      .padding(.top, 4)
 
-          Spacer()
+      Spacer()
 
-          // Filmstrip Scrubber (High-Speed Scrubbing)
-          if items.count > 1 {
-            NativeViewerFilmstrip(
-              client: client,
-              device: device,
-              items: items,
-              currentAssetID: $currentAssetID
-            )
-            .padding(.bottom, 8)
+      // Filmstrip Scrubber (无黑胶囊底框，通透悬浮)
+      if items.count > 1 {
+        NativeViewerFilmstrip(
+          client: client,
+          device: device,
+          items: items,
+          currentAssetID: $currentAssetID
+        )
+        .padding(.bottom, 8)
+      }
+
+      // Bottom Bar (对齐原生相册：左圆分享 + 中胶囊操作组 + 右圆删除)
+      HStack(alignment: .center, spacing: 0) {
+        // 左：分享圆形卡片
+        viewerCircleActionButton(
+          title: isPreparingShare ? "准备中" : "分享",
+          systemName: "square.and.arrow.up",
+          disabled: isPreparingShare,
+          action: { showShareOptionsDialog = true }
+        )
+
+        Spacer()
+
+        // 中：胶囊卡片（收藏、详情、加入相册/调节）
+        HStack(spacing: 28) {
+          // 收藏
+          Button(action: toggleFavorite) {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+              .font(.system(size: 21, weight: .regular))
+              .foregroundColor(isFavorite ? .red : .primary)
           }
+          .disabled(isProcessingFavorite || currentItem == nil)
+          .accessibilityLabel(isFavorite ? "已收藏" : "收藏")
 
-          // Bottom Bar
-          HStack(spacing: 12) {
-            // Share
-            viewerActionButton(
-              title: isPreparingShare ? "准备中" : "分享",
-              disabled: isPreparingShare,
-              action: { showShareOptionsDialog = true }
-            ) {
-              if isPreparingShare { ProgressView().tint(.white) }
-              else { Image(systemName: "square.and.arrow.up").font(.system(size: 19)) }
-            }
-
-            // Save to Device Photo Library (if only on server or needs local save)
-            if currentItem?.server != nil && currentItem?.local == nil {
-              viewerActionButton(
-                title: isSavingToDevice ? "保存中" : "存到相册",
-                disabled: isSavingToDevice,
-                action: { Task { await saveCurrentServerAssetToDevice() } }
-              ) {
-                if isSavingToDevice { ProgressView().tint(.white) }
-                else { Image(systemName: "arrow.down.to.line").font(.system(size: 19)) }
-              }
-            }
-
-            // Favorite
-            viewerActionButton(
-              title: isFavorite ? "已收藏" : "收藏",
-              disabled: isProcessingFavorite || currentItem == nil,
-              opacity: currentItem != nil ? 1 : 0.4,
-              action: toggleFavorite
-            ) {
-              Image(systemName: isFavorite ? "heart.fill" : "heart")
-                .font(.system(size: 19))
-                .foregroundColor(isFavorite ? .red : .white)
-            }
-
-            // Info Details
-            viewerActionButton(
-              title: "详情",
-              action: { showInfoSheet = true }
-            ) {
-              Image(systemName: "info.circle").font(.system(size: 19))
-            }
-
-            // Add to Album
-            viewerActionButton(
-              title: "加入相册",
-              disabled: currentItem == nil,
-              action: { showAlbumTargetDialog = true }
-            ) {
-              Image(systemName: "plus.rectangle.on.folder").font(.system(size: 19))
-            }
-
-            // Archive (directly shown)
-            viewerActionButton(
-              title: "归档",
-              disabled: isDeletingItem || currentItem?.server == nil,
-              opacity: currentItem?.server != nil ? 1 : 0.4,
-              action: { Task { await archiveCurrentServerCopy() } }
-            ) {
-              Image(systemName: "archivebox").font(.system(size: 19))
-            }
-
-            // Delete / Trash
-            viewerActionButton(
-              title: isRemoteOnly ? "回收站" : "删除",
-              disabled: isDeletingItem || currentItem == nil,
-              action: handleDeleteOrTrashTap
-            ) {
-              Image(systemName: "trash").font(.system(size: 19))
-            }
+          // 详情
+          Button {
+            showInfoSheet = true
+          } label: {
+            Image(systemName: "info.circle")
+              .font(.system(size: 21, weight: .regular))
+              .foregroundColor(.primary)
           }
-          .padding(.vertical, 8)
-          .padding(.horizontal, 16)
-          .background(Color.black.opacity(0.65))
-          .cornerRadius(24)
-          .padding(.bottom, 8)
+          .accessibilityLabel("详情")
+
+          // 加入相册 / 调节
+          viewerCapsuleActionButton(
+            title: "加入相册",
+            systemName: "slider.horizontal.3",
+            disabled: currentItem == nil,
+            action: { showAlbumTargetDialog = true }
+          )
+        }
+        .padding(.horizontal, 28)
+        .frame(height: 48)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+
+        Spacer()
+
+        // 右：删除 / 回收站圆形卡片
+        viewerCircleActionButton(
+          title: isRemoteOnly ? "回收站" : "删除",
+          systemName: "trash",
+          disabled: isDeletingItem || currentItem == nil,
+          action: handleDeleteOrTrashTap
+        )
+      }
+      .padding(.horizontal, 20)
+      .padding(.bottom, 6)
     }
-    .padding(.horizontal, 8)
+    .padding(.horizontal, 4)
   }
 
   @ViewBuilder
-  private func viewerActionButton<IconContent: View>(
+  private func viewerCircleActionButton(
     title: String,
+    systemName: String,
     disabled: Bool = false,
-    opacity: Double = 1.0,
-    action: @escaping () -> Void,
-    @ViewBuilder icon: () -> IconContent
+    action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      VStack(spacing: 4) {
-        icon()
-          .frame(width: 24, height: 24, alignment: .center)
-        Text(title)
-          .font(.caption2)
-          .lineLimit(1)
-      }
-      .frame(minWidth: 44, minHeight: 44)
-      .foregroundColor(.white)
+      Image(systemName: systemName)
+        .font(.system(size: 20, weight: .regular))
+        .foregroundColor(.primary)
+        .frame(width: 48, height: 48)
+        .background(.ultraThinMaterial)
+        .clipShape(Circle())
+        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
     }
     .disabled(disabled)
-    .opacity(opacity)
+    .accessibilityLabel(title)
+  }
+
+  @ViewBuilder
+  private func viewerCapsuleActionButton(
+    title: String,
+    systemName: String,
+    disabled: Bool = false,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemName)
+        .font(.system(size: 21, weight: .regular))
+        .foregroundColor(.primary)
+    }
+    .disabled(disabled)
+    .accessibilityLabel(title)
   }
 
   private func performDeleteItem(scope: NativeDeleteTargetScope, item requestedItem: NativeGridItem? = nil) {
@@ -5102,7 +5180,7 @@ private struct NativeVideoSurface: UIViewRepresentable {
 
   func makeUIView(context: Context) -> NativeVideoPlayerView {
     let view = NativeVideoPlayerView()
-    view.backgroundColor = .black
+    view.backgroundColor = .clear
     view.playerLayer.videoGravity = .resizeAspect
     return view
   }
@@ -5147,107 +5225,114 @@ private struct NativeSingleAssetPage: View {
 
   var body: some View {
     GeometryReader { proxy in
+      let topPadding: CGFloat = showsControls ? 88 : 0
+      let bottomPadding: CGFloat = showsControls ? 142 : 0
+      let effectiveHeight = max(100, proxy.size.height - topPadding - bottomPadding)
+      let contentSize = CGSize(width: proxy.size.width, height: effectiveHeight)
+
       ZStack {
-        Color.black.ignoresSafeArea()
+        (showsControls ? Color(uiColor: .systemBackground) : Color.black)
+          .ignoresSafeArea()
           .contentShape(Rectangle())
           .onTapGesture(perform: onTap)
 
-        if item.isVideo {
-          if let player {
-            ZStack(alignment: .bottom) {
-              NativeVideoSurface(player: player)
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onTap)
-                .onAppear {
-                  setupVideoObserver(for: player)
-                  if isActive {
+        Group {
+          if item.isVideo {
+            if let player {
+              ZStack(alignment: .bottom) {
+                NativeVideoSurface(player: player)
+                  .frame(width: contentSize.width, height: contentSize.height)
+                  .contentShape(Rectangle())
+                  .onTapGesture(perform: onTap)
+                  .onAppear {
+                    setupVideoObserver(for: player)
+                    if isActive {
+                      player.play()
+                      isVideoPlaying = true
+                    }
+                  }
+                  .onDisappear {
+                    player.pause()
+                    isVideoPlaying = false
+                    removeVideoObserver()
+                  }
+
+                // Spec §3.4: paused videos show a visible play affordance over
+                // the first frame instead of auto-playing.
+                if !isVideoPlaying, !isLoading {
+                  Button {
+                    if videoCurrentTime >= videoDuration && videoDuration > 0 {
+                      player.seek(to: .zero)
+                    }
                     player.play()
                     isVideoPlaying = true
+                  } label: {
+                    Image(systemName: "play.fill")
+                      .font(.system(size: 34, weight: .bold))
+                      .foregroundColor(.white.opacity(0.95))
+                      .frame(width: 76, height: 76)
+                      .background(.ultraThinMaterial, in: Circle())
+                      .shadow(radius: 8)
                   }
-                }
-                .onDisappear {
-                  player.pause()
-                  isVideoPlaying = false
-                  removeVideoObserver()
+                  .accessibilityLabel("播放视频")
+                  .contentShape(Circle())
                 }
 
-              // Spec §3.4: paused videos show a visible play affordance over
-              // the first frame instead of auto-playing.
-              if !isVideoPlaying, !isLoading {
-                Button {
-                  if videoCurrentTime >= videoDuration && videoDuration > 0 {
-                    player.seek(to: .zero)
-                  }
-                  player.play()
-                  isVideoPlaying = true
-                } label: {
-                  Image(systemName: "play.fill")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundColor(.white.opacity(0.95))
-                    .frame(width: 76, height: 76)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .shadow(radius: 8)
+                if showsControls {
+                  videoControlsOverlay
                 }
-                .accessibilityLabel("播放视频")
-                .contentShape(Circle())
               }
-
-              if showsControls {
-                videoControlsOverlay
-              }
-            }
-        } else {
-          VStack(spacing: 12) {
-              if isLoading { ProgressView().tint(.white) }
-              else {
-                Text(loadError ?? "视频暂不可用").font(.caption).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center)
-                Button("重试") { Task { await loadAssetContent() } }.buttonStyle(.bordered).tint(.white)
+            } else {
+              VStack(spacing: 12) {
+                if isLoading { ProgressView().tint(.primary) }
+                else {
+                  Text(loadError ?? "视频暂不可用").font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
+                  Button("重试") { Task { await loadAssetContent() } }.buttonStyle(.bordered)
+                }
               }
             }
-          }
-        } else {
-          if isLivePlaying && isActive && isLivePhotoEnabled, let livePlayer, livePhoto == nil {
-            VideoPlayer(player: livePlayer)
-              .frame(width: proxy.size.width, height: proxy.size.height)
-              .ignoresSafeArea()
-              .allowsHitTesting(false)
-          } else if let livePhoto {
-            NativeZoomableLivePhotoView(
-              livePhoto: livePhoto,
-              isPlaying: isLivePlaying && isActive && isLivePhotoEnabled,
-              isEnabled: isLivePhotoEnabled,
-              isMuted: isLivePhotoMuted,
-              isActive: isActive,
-              size: proxy.size,
-              onTap: onTap,
-              onZoomChanged: onZoomChanged
-            )
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .ignoresSafeArea()
-          } else if let image {
-            NativeZoomableImageView(
-              image: image,
-              isActive: isActive,
-              size: proxy.size,
-              onTap: onTap,
-              onZoomChanged: onZoomChanged
-            )
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .ignoresSafeArea()
           } else {
-            VStack(spacing: 10) {
-              if isLoading { ProgressView().tint(.white) }
-              else {
-                Image(systemName: "photo").font(.system(size: 42)).foregroundColor(.white.opacity(0.5))
-                Text(loadError ?? "无法加载原件").font(.caption).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center)
-                Button("重试") { Task { await loadAssetContent() } }.buttonStyle(.bordered).tint(.white)
+            if isLivePlaying && isActive && isLivePhotoEnabled, let livePlayer, livePhoto == nil {
+              VideoPlayer(player: livePlayer)
+                .frame(width: contentSize.width, height: contentSize.height)
+                .allowsHitTesting(false)
+            } else if let livePhoto {
+              NativeZoomableLivePhotoView(
+                livePhoto: livePhoto,
+                isPlaying: isLivePlaying && isActive && isLivePhotoEnabled,
+                isEnabled: isLivePhotoEnabled,
+                isMuted: isLivePhotoMuted,
+                isActive: isActive,
+                size: contentSize,
+                onTap: onTap,
+                onZoomChanged: onZoomChanged
+              )
+              .frame(width: contentSize.width, height: contentSize.height)
+            } else if let image {
+              NativeZoomableImageView(
+                image: image,
+                isActive: isActive,
+                size: contentSize,
+                onTap: onTap,
+                onZoomChanged: onZoomChanged
+              )
+              .frame(width: contentSize.width, height: contentSize.height)
+            } else {
+              VStack(spacing: 10) {
+                if isLoading { ProgressView().tint(.primary) }
+                else {
+                  Image(systemName: "photo").font(.system(size: 42)).foregroundColor(.secondary.opacity(0.5))
+                  Text(loadError ?? "无法加载原件").font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
+                  Button("重试") { Task { await loadAssetContent() } }.buttonStyle(.bordered)
+                }
               }
+              .padding()
             }
-            .padding()
           }
         }
+        .padding(.top, topPadding)
+        .padding(.bottom, bottomPadding)
+        .animation(.easeInOut(duration: 0.25), value: showsControls)
 
         if liveResourceMissing && isLive {
           VStack {
@@ -5684,7 +5769,7 @@ private struct NativeZoomableLivePhotoView: UIViewRepresentable {
     scrollView.showsHorizontalScrollIndicator = false
     scrollView.contentInsetAdjustmentBehavior = .never
     scrollView.automaticallyAdjustsScrollIndicatorInsets = false
-    scrollView.backgroundColor = .black
+    scrollView.backgroundColor = .clear
 
     let photoView = PHLivePhotoView()
     photoView.contentMode = .scaleAspectFit
@@ -5831,7 +5916,7 @@ private struct NativeZoomableImageView: UIViewRepresentable {
     scrollView.showsHorizontalScrollIndicator = false
     scrollView.contentInsetAdjustmentBehavior = .never
     scrollView.automaticallyAdjustsScrollIndicatorInsets = false
-    scrollView.backgroundColor = .black
+    scrollView.backgroundColor = .clear
 
     let imageView = UIImageView(image: image)
     imageView.contentMode = .scaleAspectFit
