@@ -107,6 +107,10 @@ CI 入口为 `.github/workflows/build-ios.yml`；设备推送入口为 `scripts/
 
 修改手势、布局或数据操作后，须按《Agent 详细设计规范》的相关验收用例回归，并说明实际验证的平台与未验证项。
 
+### 5.4 拉取IPA到本地Livecontainer源
+
+使用 `scripts/update_livecontainer_ipa.sh` 拉取最新 `action` 编译的IPA到对应目录并刷新 `source.json` 。
+
 ## 6. HarmonyOS 模拟器 IPv6 排障
 
 已记录的开发环境问题：测试服务器只有 AAAA 记录，Windows 可正常通过 IPv6 登录，模拟器 DNS / IPv6 连通失败。此类故障不能显示为密码错误；保留 BusinessError 错误码和可读信息，不输出 `[object Object]`。
