@@ -101,7 +101,7 @@ xcodebuild -project Runner.xcodeproj -scheme Runner \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
 ```
 
-CI 入口为 `.github/workflows/build-ios.yml`；设备推送入口为 `push_ios.sh`。构建、上传和设备验收分别记录，不能把 Git push 成功当成 IPA 构建成功。
+CI 入口为 `.github/workflows/build-ios.yml`；设备推送入口为 `scripts/push_ios.sh`。构建、上传和设备验收分别记录，不能把 Git push 成功当成 IPA 构建成功。
 
 ### 5.3 手势与数据回归
 
