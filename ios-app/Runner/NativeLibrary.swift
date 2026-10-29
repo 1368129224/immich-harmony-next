@@ -631,134 +631,75 @@ func nativeMemoriesOnThisDay(
 
 struct NativeMemoriesView: View {
   let client: NativeImmichClient
+  @ObservedObject var device: NativeDeviceLibrary
   @State private var memories: [[String: Any]] = []
   @State private var loading = false
+  @State private var didLoad = false
   @State private var error: String?
 
-  var body: some View {
-    List {
-      if loading && memories.isEmpty { ProgressView() }
-      if let error {
-        Text(error).foregroundColor(.red)
-        Button("重试") { Task { await load() } }
-      }
-      if !loading && error == nil && memories.isEmpty {
-        Text("暂无往年今天的回忆").foregroundColor(.secondary)
-      }
-      ForEach(memories.indices, id: \.self) { index in
-        let memory = memories[index]
-        let title = memoryTitle(for: memory)
-        let detail = memoryDetail(for: memory)
-        let assets = (memory["assets"] as? [[String: Any]])?.compactMap(NativeImmichClient.decodeAsset) ?? []
+  private var assets: [NativeAsset] {
+    var ids = Set<String>()
+    return memories.flatMap { ($0["assets"] as? [[String: Any]]) ?? [] }
+      .compactMap(NativeImmichClient.decodeAsset)
+      .filter { ids.insert($0.id).inserted }
+  }
 
-        NavigationLink {
-          NativeMemoryDetailView(client: client, title: title, detail: detail, assets: assets)
-        } label: {
-          HStack(spacing: 14) {
-            if let firstAsset = assets.first, let url = client.thumbnailURL(for: firstAsset) {
-              NativeMemoryCoverThumb(client: client, url: url)
-            } else {
-              RoundedRectangle(cornerRadius: 8)
-                .fill(Color(UIColor.secondarySystemBackground))
-                .frame(width: 56, height: 56)
-                .overlay(Image(systemName: "sparkles").foregroundColor(.secondary))
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-              Text(title)
-                .font(.headline)
-              if !detail.isEmpty {
-                Text(detail)
-                  .font(.subheadline)
-                  .foregroundColor(.secondary)
-              }
-            }
-            Spacer()
-          }
-          .padding(.vertical, 4)
-        }
-      }
+  private var matchingLocals: [NativeDeviceAsset] {
+    let serverIDs = Set(assets.map(\.id))
+    return device.assets.filter { local in
+      NativeSyncCacheStore.shared.serverID(for: local.id).map { serverIDs.contains($0) } ?? false
     }
-    .navigationTitle("回忆")
-    .refreshable { await load() }
-    .task { if memories.isEmpty { await load() } }
+  }
+
+  var body: some View {
+    // Show anniversary photos directly, grouped by capture date like Photos;
+    // do not put a separate, non-selectable list of year cards in front of it.
+    NativeCollectionBrowser(
+      client: client, device: device, title: "回忆", subtitle: "往年今天",
+      emptyMessage: "暂无往年今天的回忆", assets: assets, localAssets: matchingLocals,
+      initialPositionReady: didLoad, loading: loading, loadError: error,
+      refresh: { await load() }
+    )
+    .task { if !didLoad { await load() } }
   }
 
   private func load() async {
     guard !loading else { return }
     loading = true
-    defer { loading = false }
+    defer { loading = false; didLoad = true }
     do {
       let today = Date()
       let rows = try await client.libraryRows("memories", query: [
         URLQueryItem(name: "for", value: nativeMemoryDayKey(for: today)),
         URLQueryItem(name: "type", value: "on_this_day"),
       ])
-      // Servers may keep several days' memories visible. The server query is
-      // only a first pass; enforce today's anniversary on cards AND members.
+      // Servers may keep several days' memories visible. Enforce today's
+      // anniversary on both the returned memories and their photo members.
       memories = nativeMemoriesOnThisDay(rows, now: today)
       error = nil
-    } catch {
-      self.error = error.localizedDescription
-    }
-  }
-
-  private func memoryTitle(for row: [String: Any]) -> String {
-    let year = (row["data"] as? [String: Any])?["year"] as? Int
-    if let year {
-      let currentYear = Calendar.current.component(.year, from: Date())
-      let diff = currentYear - year
-      if diff > 0 {
-        return "\(diff) 年前的今天 (\(year)年)"
-      } else {
-        return "那年今日 (\(year)年)"
-      }
-    }
-    if let memoryAtStr = row["memoryAt"] as? String,
-       let date = NativeImmichClient.parseISODate(memoryAtStr) {
-      let fmt = DateFormatter()
-      fmt.dateFormat = "M月d日的回忆"
-      return fmt.string(from: date)
-    }
-    return "那年今日"
-  }
-
-  private func memoryDetail(for row: [String: Any]) -> String {
-    var parts: [String] = []
-    if let memoryAtStr = row["memoryAt"] as? String,
-       let date = NativeImmichClient.parseISODate(memoryAtStr) {
-      let fmt = DateFormatter()
-      fmt.dateFormat = "yyyy年M月d日"
-      parts.append(fmt.string(from: date))
-    }
-    if let assets = row["assets"] as? [Any] {
-      parts.append("\(assets.count) 张照片")
-    }
-    return parts.joined(separator: " · ")
+    } catch { self.error = error.localizedDescription }
   }
 }
 
 struct NativeMemoryDetailView: View {
   let client: NativeImmichClient
+  @ObservedObject var device: NativeDeviceLibrary
   let title: String
   let detail: String
   let assets: [NativeAsset]
 
-  var body: some View {
-    VStack(spacing: 0) {
-      if !detail.isEmpty {
-        HStack {
-          Text(detail)
-            .font(.footnote)
-            .foregroundColor(.secondary)
-          Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
-      }
-      NativeResultGrid(client: client, assets: assets, hasOlder: false, loadMore: {})
+  private var matchingLocals: [NativeDeviceAsset] {
+    let serverIDs = Set(assets.map(\.id))
+    return device.assets.filter { local in
+      NativeSyncCacheStore.shared.serverID(for: local.id).map { serverIDs.contains($0) } ?? false
     }
-    .navigationTitle(title)
+  }
+
+  var body: some View {
+    NativeCollectionBrowser(
+      client: client, device: device, title: title, subtitle: detail,
+      assets: assets, localAssets: matchingLocals
+    )
   }
 }
 

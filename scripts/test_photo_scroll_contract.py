@@ -149,9 +149,11 @@ class PhotoScrollContractTests(unittest.TestCase):
         self.assertIn("albumColumns = target", features_source)
         # Remove from album vs delete photos
         album_detail = features_source.split("private struct NativeAlbumDetail", 1)[1]
-        self.assertIn("移出相册", album_detail)
-        self.assertIn("删除照片", album_detail)
-        self.assertIn("removeSelectedFromAlbum", album_detail)
+        self.assertIn("NativeCollectionBrowser", album_detail)
+        browser = (ROOT / "ios-app/Runner/NativeCollectionBrowser.swift").read_text()
+        self.assertIn("移出相册", browser)
+        self.assertIn("删除选中的照片", browser)
+        self.assertIn("removeSelectedFromAlbum", browser)
         # Backup default disabled and album selection required
         self.assertIn('UserDefaults.standard.object(forKey: "backup_enabled") as? Bool ?? false', backup_source)
         self.assertIn("请先选择需要备份的手机相册", backup_source)

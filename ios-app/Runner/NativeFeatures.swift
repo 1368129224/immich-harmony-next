@@ -228,6 +228,34 @@ func nativeShouldRefreshPhotoFrames(
   return false
 }
 
+// MARK: - Collection selection helpers (Foundation-only)
+func nativeContinuousSelection(
+  orderedIDs: [String], baseline: Set<String>, startID: String, endID: String, selecting: Bool
+) -> Set<String> {
+  guard let start = orderedIDs.firstIndex(of: startID),
+        let end = orderedIDs.firstIndex(of: endID) else { return baseline }
+  let range = Set(orderedIDs[min(start, end)...max(start, end)])
+  return selecting ? baseline.union(range) : baseline.subtracting(range)
+}
+
+func nativeSelectionHitID(at point: CGPoint, orderedIDs: [String], frames: [String: CGRect]) -> String? {
+  guard point.x.isFinite, point.y.isFinite else { return nil }
+  let candidates = orderedIDs.compactMap { id -> (String, CGRect)? in
+    guard let frame = frames[id], !frame.isNull, !frame.isEmpty,
+          frame.minX.isFinite, frame.minY.isFinite else { return nil }
+    return (id, frame)
+  }
+  if let hit = candidates.first(where: { $0.1.contains(point) }) { return hit.0 }
+  // Snap gutters/date-header gaps to the closest visible cell. Iteration follows
+  // visual order so equal-distance hits are deterministic, unlike Dictionary.first.
+  return candidates.min {
+    let lhs = pow($0.1.midX - point.x, 2) + pow($0.1.midY - point.y, 2)
+    let rhs = pow($1.1.midX - point.x, 2) + pow($1.1.midY - point.y, 2)
+    return lhs < rhs
+  }?.0
+}
+// MARK: - Gesture direction
+
 func nativeDragSelectionIntent(for translation: CGSize) -> NativeDragSelectionIntent {
   let horizontal = abs(translation.width)
   let vertical = abs(translation.height)
@@ -999,6 +1027,23 @@ func nativeSortedResultDays(_ days: [Date], oldestFirst: Bool) -> [Date] {
   days.sorted { oldestFirst ? $0 < $1 : $0 > $1 }
 }
 
+func nativeCollectionGridItems(
+  assets: [NativeAsset], localAssets: [NativeDeviceAsset], matchedServerIDs: [String: String]
+) -> [NativeGridItem] {
+  let servers = Dictionary(assets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+  var used = Set<String>()
+  var localIDs = Set<String>()
+  var items = localAssets.filter { localIDs.insert($0.id).inserted }.map { local -> NativeGridItem in
+    let server = matchedServerIDs[local.id].flatMap { servers[$0] }
+    if let server { used.insert(server.id) }
+    return NativeGridItem(server: server, local: local)
+  }
+  for server in assets where used.insert(server.id).inserted {
+    items.append(NativeGridItem(server: server, local: nil))
+  }
+  return items.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date }
+}
+
 struct NativeResultGrid: View {
   let client: NativeImmichClient
   let assets: [NativeAsset]
@@ -1007,6 +1052,11 @@ struct NativeResultGrid: View {
   var startsAtLatest = false
   var initialPositionReady = true
   var preservesServerOrder = false
+  var latestRequest = 0
+  var device: NativeDeviceLibrary? = nil
+  var onDeleteItem: ((NativeGridItem, NativeDeleteTargetScope) -> Void)? = nil
+  var onServerAssetUpdated: ((NativeAsset) -> Void)? = nil
+  var onServerAssetArchived: ((String) -> Void)? = nil
   var isSelectingBinding: Binding<Bool>? = nil
   var selectedIDsBinding: Binding<Set<String>>? = nil
   let loadMore: () -> Void
@@ -1016,7 +1066,9 @@ struct NativeResultGrid: View {
 
   @State private var isDragSelecting = false
   @State private var dragSelectionIntent: NativeDragSelectionIntent = .undecided
-  @State private var longPressDragIntent: NativeDragSelectionIntent = .undecided
+  @State private var longPressSelectionActive = false
+  @GestureState private var selectionDragActive = false
+  @GestureState private var selectionPressActive = false
   @State private var isMagnifying = false
   @State private var columns: Int = 4
   @State private var gestureBaseColumns: Int? = nil
@@ -1066,6 +1118,11 @@ struct NativeResultGrid: View {
     startsAtLatest: Bool = false,
     initialPositionReady: Bool = true,
     preservesServerOrder: Bool = false,
+    latestRequest: Int = 0,
+    device: NativeDeviceLibrary? = nil,
+    onDeleteItem: ((NativeGridItem, NativeDeleteTargetScope) -> Void)? = nil,
+    onServerAssetUpdated: ((NativeAsset) -> Void)? = nil,
+    onServerAssetArchived: ((String) -> Void)? = nil,
     isSelecting: Binding<Bool>? = nil,
     selectedIDs: Binding<Set<String>>? = nil,
     loadMore: @escaping () -> Void
@@ -1077,6 +1134,11 @@ struct NativeResultGrid: View {
     self.startsAtLatest = startsAtLatest
     self.initialPositionReady = initialPositionReady
     self.preservesServerOrder = preservesServerOrder
+    self.latestRequest = latestRequest
+    self.device = device
+    self.onDeleteItem = onDeleteItem
+    self.onServerAssetUpdated = onServerAssetUpdated
+    self.onServerAssetArchived = onServerAssetArchived
     self.isSelectingBinding = isSelecting
     self.selectedIDsBinding = selectedIDs
     self.loadMore = loadMore
@@ -1088,35 +1150,10 @@ struct NativeResultGrid: View {
     if preservesServerOrder {
       return assets.map { NativeGridItem(server: $0, local: nil) }
     }
-    let matched = NativeSyncCacheStore.shared.matchedServerIDs
-    let serverById = Dictionary(assets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-
-    var usedServerIDs = Set<String>()
-    var items: [NativeGridItem] = []
-    items.reserveCapacity(assets.count + localAssets.count)
-
-    let unmatchedServers = assets.filter { !matched.values.contains($0.id) }
-    let serverBySec = nativeIndexAssetsBySecond(unmatchedServers)
-
-    for localAsset in localAssets {
-      if let serverID = matched[localAsset.id], let serverAsset = serverById[serverID] {
-        items.append(NativeGridItem(server: serverAsset, local: localAsset))
-        usedServerIDs.insert(serverAsset.id)
-      } else if let heuristicServer = nativeFindHeuristicServerMatch(local: localAsset, serverBySecond: serverBySec, usedServerIDs: usedServerIDs) {
-        items.append(NativeGridItem(server: heuristicServer, local: localAsset))
-        usedServerIDs.insert(heuristicServer.id)
-      } else {
-        items.append(NativeGridItem(server: nil, local: localAsset))
-      }
-    }
-
-    for serverAsset in assets {
-      if !usedServerIDs.contains(serverAsset.id) {
-        items.append(NativeGridItem(server: serverAsset, local: nil))
-      }
-    }
-
-    return items.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date }
+    return nativeCollectionGridItems(
+      assets: assets, localAssets: localAssets,
+      matchedServerIDs: NativeSyncCacheStore.shared.matchedServerIDs
+    )
   }
 
   private var mergedGroups: [Date: [NativeGridItem]] {
@@ -1124,6 +1161,12 @@ struct NativeResultGrid: View {
     var calendar = Calendar.autoupdatingCurrent
     calendar.timeZone = .autoupdatingCurrent
     return Dictionary(grouping: merged) { calendar.startOfDay(for: $0.date) }
+  }
+
+  private var visualOrderedAssetIDs: [String] {
+    let groups = mergedGroups
+    return nativeSortedResultDays(Array(groups.keys), oldestFirst: startsAtLatest)
+      .flatMap { (groups[$0] ?? []).map(\.id) }
   }
 
   var body: some View {
@@ -1209,14 +1252,37 @@ struct NativeResultGrid: View {
                   }
                 }
                 .contentShape(Rectangle())
-                .onLongPressGesture(minimumDuration: 0.28, maximumDistance: 15) {
-                  guard !isMagnifying else { return }
-                  if !isSelecting {
-                    enterSelection(startingWith: entry.id)
-                  } else {
-                    startDragSelectionInSelectMode(startingWith: entry.id)
-                  }
-                }
+                .simultaneousGesture(
+                  LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("resultGridScrollSpace")))
+                    .updating($selectionPressActive) { _, active, _ in active = true }
+                    .onChanged { phase in
+                      guard !isMagnifying else { return }
+                      switch phase {
+                      case .first(true):
+                        guard !isSelecting else { return }
+                        longPressSelectionActive = true
+                        enterSelection(startingWith: entry.id)
+                      case .second(true, let drag):
+                        // Some OS versions first emit the recognized state here.
+                        if !isSelecting {
+                          longPressSelectionActive = true
+                          enterSelection(startingWith: entry.id)
+                        }
+                        guard longPressSelectionActive, let drag else { return }
+                        if dragSelectionIntent == .undecided {
+                          dragSelectionIntent = nativeDragSelectionIntent(for: drag.translation)
+                        }
+                        guard dragSelectionIntent == .select else { return }
+                        isDragSelecting = true
+                        handle2DDragSelection(at: drag.location)
+                      default: break
+                      }
+                    }
+                    .onEnded { _ in
+                      if longPressSelectionActive { resetSelectionDrag() }
+                    }
+                )
                 .id(entry.id)
               }
             }
@@ -1233,6 +1299,10 @@ struct NativeResultGrid: View {
         }
       }
       .onAppear { positionAtLatest(proxy: scrollProxy) }
+      .onChange(of: latestRequest) { _ in
+        userMovedGrid = false
+        positionAtLatest(proxy: scrollProxy)
+      }
       .onChange(of: initialPositionReady) { _ in
         positionAtLatest(proxy: scrollProxy)
       }
@@ -1245,56 +1315,55 @@ struct NativeResultGrid: View {
       .simultaneousGesture(
         DragGesture(minimumDistance: 20)
           .onChanged { drag in
-            guard startsAtLatest, !isSelecting,
+            guard startsAtLatest, !isDragSelecting,
                   abs(drag.translation.height) > 25 else { return }
             userMovedGrid = true
             bottomPositionTask?.cancel()
           }
       )
     }
-    .onDisappear { bottomPositionTask?.cancel() }
+    .onDisappear {
+      bottomPositionTask?.cancel()
+      resetSelectionDrag()
+    }
+    .onChange(of: selectionDragActive) { active in
+      if !active && !longPressSelectionActive { resetSelectionDrag() }
+    }
+    .onChange(of: selectionPressActive) { active in
+      if !active && longPressSelectionActive { resetSelectionDrag() }
+    }
+    .onChange(of: isSelecting) { selecting in
+      if selecting {
+        userMovedGrid = true
+        bottomPositionTask?.cancel()
+      } else {
+        resetSelectionDrag()
+      }
+    }
     .coordinateSpace(name: "resultGridScrollSpace")
     .nativeScrollDisabled(isDragSelecting)
     .onPreferenceChange(NativeItemFramePreferenceKey.self) { frames in
       itemBounds = frames
     }
     .simultaneousGesture(
-      LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
-        .sequenced(before: DragGesture(coordinateSpace: .named("resultGridScrollSpace")))
-        .onChanged { value in
-          guard !isMagnifying else { return }
-          switch value {
-          case .first:
-            break
-          case .second(true, let drag):
-            if let drag = drag, longPressDragIntent == .undecided {
-              let intent = nativeDragSelectionIntent(for: drag.translation)
-              if intent != .undecided { longPressDragIntent = intent }
-            }
-            guard longPressDragIntent == .select else { break }
-            if !isDragSelecting {
-              isDragSelecting = true
-              let loc = drag?.startLocation ?? drag?.location
-              if let loc = loc,
-                 let hitID = itemBounds.first(where: { $0.value.contains(loc) })?.key {
-                if !isSelecting {
-                  enterSelection(startingWith: hitID, at: loc)
-                } else {
-                  startDragSelectionInSelectMode(startingWith: hitID, at: loc)
-                }
-              }
-            }
-            if let drag = drag {
-              handle2DDragSelection(at: drag.location)
-            }
-          default:
-            break
+      DragGesture(minimumDistance: 4, coordinateSpace: .named("resultGridScrollSpace"))
+        .updating($selectionDragActive) { _, active, _ in active = true }
+        .onChanged { drag in
+          guard isSelecting, !isMagnifying, !longPressSelectionActive else { return }
+          if dragSelectionIntent == .undecided {
+            dragSelectionIntent = nativeDragSelectionIntent(for: drag.translation)
           }
+          guard dragSelectionIntent == .select else { return }
+          if !isDragSelecting {
+            let ordered = visualOrderedAssetIDs
+            guard let hitID = nativeSelectionHitID(at: drag.startLocation, orderedIDs: ordered, frames: itemBounds) else { return }
+            isDragSelecting = true
+            startDragSelectionInSelectMode(startingWith: hitID, at: drag.startLocation)
+          }
+          handle2DDragSelection(at: drag.location)
         }
         .onEnded { _ in
-          isDragSelecting = false
-          longPressDragIntent = .undecided
-          finishDragSelection()
+          if !longPressSelectionActive { resetSelectionDrag() }
         }
     )
     .simultaneousGesture(
@@ -1323,7 +1392,7 @@ struct NativeResultGrid: View {
           } else {
             delta = (1.0 / max(0.08, effectiveValue) - 1.0) * 4.0
           }
-          let target = min(15, max(1, Int(round(Double(base) + delta))))
+          let target = min(15, max(2, Int(round(Double(base) + delta))))
           if target != columns {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
@@ -1341,10 +1410,13 @@ struct NativeResultGrid: View {
     .fullScreenCover(item: $activeViewerItem) { item in
       NativeUnifiedGalleryViewer(
         client: client,
-        device: NativeDeviceLibrary(),
+        device: device ?? NativeDeviceLibrary(),
         items: merged,
         initialItem: item,
         sourceFrame: viewerSourceFrame,
+        onDeleteItem: onDeleteItem,
+        onServerAssetUpdated: onServerAssetUpdated,
+        onServerAssetArchived: onServerAssetArchived,
         onDismissViewer: {
           var transaction = Transaction()
           transaction.disablesAnimations = true
@@ -1357,7 +1429,7 @@ struct NativeResultGrid: View {
   }
 
   private func positionAtLatest(proxy: ScrollViewProxy) {
-    guard startsAtLatest, initialPositionReady, !userMovedGrid,
+    guard startsAtLatest, initialPositionReady, !userMovedGrid, !isSelecting, activeViewerItem == nil,
           !merged.isEmpty else { return }
     bottomPositionTask?.cancel()
     bottomPositionTask = Task { @MainActor in
@@ -1365,7 +1437,7 @@ struct NativeResultGrid: View {
         if delay > 0 {
           try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
         }
-        guard !Task.isCancelled, !userMovedGrid else { return }
+        guard !Task.isCancelled, !userMovedGrid, !isSelecting, activeViewerItem == nil else { return }
         withAnimation(.none) {
           proxy.scrollTo(bottomAnchor, anchor: .bottom)
         }
@@ -1412,52 +1484,24 @@ struct NativeResultGrid: View {
   }
 
   private func handle2DDragSelection(at location: CGPoint) {
-    guard isSelecting else { return }
-    if dragStartLocation == nil {
-      dragStartLocation = location
-      dragInitialSelectedIDs = selectedIDs
-      if let hitID = itemBounds.first(where: { $0.value.contains(location) })?.key {
-        dragStartAssetID = hitID
-        dragSelectMode = !selectedIDs.contains(hitID)
-      } else {
-        dragSelectMode = true
-      }
-    }
-
-    let startLoc = dragStartLocation ?? location
-    let minX = min(startLoc.x, location.x)
-    let minY = min(startLoc.y, location.y)
-    let maxX = max(startLoc.x, location.x)
-    let maxY = max(startLoc.y, location.y)
-
-    let selectionRect = CGRect(
-      x: minX,
-      y: minY,
-      width: max(maxX - minX, 6),
-      height: max(maxY - minY, 6)
+    guard isSelecting, let startID = dragStartAssetID else { return }
+    let ordered = visualOrderedAssetIDs
+    guard let endID = nativeSelectionHitID(at: location, orderedIDs: ordered, frames: itemBounds) else { return }
+    let updated = nativeContinuousSelection(
+      orderedIDs: ordered, baseline: dragInitialSelectedIDs,
+      startID: startID, endID: endID, selecting: dragSelectMode
     )
-
-    var itemsInRect = Set<String>()
-    for (id, frame) in itemBounds {
-      if frame.intersects(selectionRect) {
-        itemsInRect.insert(id)
-      }
-    }
-    if let startID = dragStartAssetID {
-      itemsInRect.insert(startID)
-    }
-
-    var updated = dragInitialSelectedIDs
-    if dragSelectMode {
-      updated.formUnion(itemsInRect)
-    } else {
-      updated.subtract(itemsInRect)
-    }
-
     if updated != selectedIDs {
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       setSelectedIDs(updated)
     }
+  }
+
+  private func resetSelectionDrag() {
+    isDragSelecting = false
+    longPressSelectionActive = false
+    dragSelectionIntent = .undecided
+    finishDragSelection()
   }
 
   private func finishDragSelection() {
@@ -3168,17 +3212,6 @@ private struct NativeAlbumDetail: View {
   let entry: NativeAlbumEntry
   let mergeAlbums: Bool
   @StateObject private var model: NativeResultsModel
-
-  @State private var isSelecting = false
-  @State private var selectedIDs: Set<String> = []
-  @State private var showDeleteConfirmation = false
-  @State private var showRemoveFromAlbumConfirmation = false
-  @State private var showLocalDeleteWarning = false
-  @State private var pendingDeleteScope: NativeDeleteTargetScope = .all
-  @State private var deletionError: String?
-  @State private var isDeleting = false
-  @State private var batchShareItems: [Any]? = nil
-  @State private var isPreparingBatchShare = false
   @State private var initialLoadCompleted = false
 
   init(client: NativeImmichClient, device: NativeDeviceLibrary, entry: NativeAlbumEntry, mergeAlbums: Bool) {
@@ -3190,291 +3223,31 @@ private struct NativeAlbumDetail: View {
   }
 
   private var localAssetsToDisplay: [NativeDeviceAsset] {
-    if mergeAlbums {
-      return entry.device.map { device.assets(in: $0) } ?? []
-    } else {
-      return entry.origin == .local ? (entry.device.map { device.assets(in: $0) } ?? []) : []
-    }
-  }
-
-  private var serverAssetsToDisplay: [NativeAsset] {
-    if mergeAlbums {
-      return model.assets
-    } else {
-      return entry.origin == .server ? model.assets : []
-    }
+    guard mergeAlbums || entry.origin == .local else { return [] }
+    return entry.device.map { device.assets(in: $0) } ?? []
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      if let error = model.error {
-        HStack {
-          Text(error).font(.caption).foregroundColor(.red)
-          Button("重试") { Task { await model.load(albumId: entry.server?.id, reset: model.assets.isEmpty) } }
-            .font(.caption)
-        }
-        .padding(6)
-      }
-      NativeResultGrid(
-        client: client,
-        assets: serverAssetsToDisplay,
-        localAssets: localAssetsToDisplay,
-        hasOlder: entry.server != nil && model.next != nil,
-        startsAtLatest: true,
-        initialPositionReady: entry.server == nil || initialLoadCompleted,
-        isSelecting: $isSelecting,
-        selectedIDs: $selectedIDs
-      ) {
-        if let id = entry.server?.id { Task { await model.load(albumId: id) } }
-      }
-      if model.loading { ProgressView().padding(8) }
-    }
-    .navigationTitle(isSelecting ? "" : entry.title)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .navigationBarLeading) {
-        if isSelecting {
-          Button("取消") {
-            isSelecting = false
-            selectedIDs.removeAll()
-          }
-        }
-      }
-      ToolbarItem(placement: .principal) {
-        if isSelecting {
-          Text("已选 \(selectedIDs.count) 项").font(.headline)
-        }
-      }
-      ToolbarItem(placement: .navigationBarTrailing) {
-        if isSelecting {
-          Button("全选") {
-            let matched = NativeSyncCacheStore.shared.matchedServerIDs
-            let serverById = Dictionary(serverAssetsToDisplay.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            var usedServerIDs = Set<String>()
-            var ids: [String] = []
-            for local in localAssetsToDisplay {
-              if let sID = matched[local.id], let sAsset = serverById[sID] {
-                ids.append("local:\(local.id)")
-                usedServerIDs.insert(sAsset.id)
-              } else {
-                ids.append("local:\(local.id)")
-              }
-            }
-            for server in serverAssetsToDisplay {
-              if !usedServerIDs.contains(server.id) {
-                ids.append("server:\(server.id)")
-              }
-            }
-            selectedIDs = Set(ids)
-          }
-        } else {
-          Button("选择") {
-            isSelecting = true
-          }
-        }
-      }
-    }
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      if isSelecting {
-        HStack(spacing: 16) {
-          Button {
-            triggerBatchShare()
-          } label: {
-            if isPreparingBatchShare {
-              ProgressView()
-                .scaleEffect(0.85)
-                .frame(width: 28, height: 28)
-            } else {
-              Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 20, weight: .regular))
-            }
-          }
-          .disabled(selectedIDs.isEmpty || isPreparingBatchShare)
-
-          Spacer()
-
-          Button {
-            showRemoveFromAlbumConfirmation = true
-          } label: {
-            HStack(spacing: 4) {
-              Image(systemName: "folder.badge.minus")
-              Text("移出相册")
-                .font(.system(size: 14, weight: .medium))
-            }
-          }
-          .disabled(selectedIDs.isEmpty || isDeleting)
-
-          Button(role: .destructive) {
-            showDeleteConfirmation = true
-          } label: {
-            HStack(spacing: 4) {
-              Image(systemName: "trash")
-              Text("删除照片")
-                .font(.system(size: 14, weight: .medium))
-            }
-            .foregroundColor(selectedIDs.isEmpty || isDeleting ? .secondary : .red)
-          }
-          .disabled(selectedIDs.isEmpty || isDeleting)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-      }
-    }
-    .sheet(item: Binding<NativeSharePayload?>(
-      get: { batchShareItems.map { NativeSharePayload(contents: $0) } },
-      set: { if $0 == nil { batchShareItems = nil } }
-    )) { payload in
-      NativeActivityView(activityItems: payload.content)
-    }
-    .confirmationDialog("从相册移出照片", isPresented: $showRemoveFromAlbumConfirmation, titleVisibility: .visible) {
-      Button("仅从当前相册移出", role: .destructive) {
-        Task { await removeSelectedFromAlbum() }
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("仅将照片从本相册移除，照片原件仍会保留在设备相册与云端。")
-    }
-    .confirmationDialog("删除选中的 \(selectedIDs.count) 项照片", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
-      Button("全部删除（本地与云端彻底删除）", role: .destructive) { Task { await deleteSelectedPhotos(scope: .all) } }
-      if selectedTargets.contains(where: { $0.local != nil && $0.server == nil }) {
-        Button("仅删除本地照片", role: .destructive) { Task { await deleteSelectedPhotos(scope: .localOnly) } }
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("确定彻底删除所选照片吗？此操作将从设备相册及云端彻底删除照片原件，不仅是移出相册！")
-    }
-    .alert("本机删除确认", isPresented: $showLocalDeleteWarning) {
-      Button("取消", role: .cancel) {}
-      Button("继续删除", role: .destructive) {
-        let targets = selectedTargets
-        let scope = pendingDeleteScope
-        Task { await performSelectedDeletion(targets: targets, scope: scope) }
-      }
-    } message: { Text("删除本机照片会永久从系统照片中移除；若开启 iCloud 照片，可能同步到其他设备。") }
-    .alert("删除失败", isPresented: Binding(get: { deletionError != nil }, set: { if !$0 { deletionError = nil } })) {
-      Button("确定", role: .cancel) { deletionError = nil }
-    } message: { Text(deletionError ?? "未知错误") }
+    NativeCollectionBrowser(
+      client: client, device: device, title: entry.title,
+      assets: model.assets, localAssets: localAssetsToDisplay,
+      hasOlder: entry.server != nil && model.next != nil,
+      initialPositionReady: entry.server == nil || initialLoadCompleted,
+      loading: model.loading, loadError: model.error,
+      serverAlbumID: entry.server?.id, localAlbumID: entry.device?.id,
+      loadMore: { if let id = entry.server?.id { Task { await model.load(albumId: id) } } },
+      refresh: { await reload() }
+    )
     .task {
-      if let server = entry.server {
-        await model.load(albumId: server.id, reset: true)
-      }
+      guard !initialLoadCompleted else { return }
+      await reload()
       initialLoadCompleted = true
     }
   }
 
-  private var selectedTargets: [NativeGridItem] {
-    let matched = NativeSyncCacheStore.shared.matchedServerIDs
-    let serverByID = Dictionary(serverAssetsToDisplay.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    let items = localAssetsToDisplay.map { local -> NativeGridItem in
-      NativeGridItem(server: matched[local.id].flatMap { serverByID[$0] }, local: local)
-    } + serverAssetsToDisplay.filter { server in
-      !localAssetsToDisplay.contains { matched[$0.id] == server.id }
-    }.map { NativeGridItem(server: $0, local: nil) }
-    return items.filter { selectedIDs.contains($0.id) }
-  }
-
-  private func removeSelectedFromAlbum() async {
-    guard !isDeleting else { return }
-    let targets = selectedTargets
-    guard !targets.isEmpty else { return }
-    isDeleting = true
-    defer { isDeleting = false }
-
-    var errors: [String] = []
-
-    if let serverAlbum = entry.server {
-      let serverIDs = targets.compactMap { $0.server?.id }
-      if !serverIDs.isEmpty {
-        do {
-          try await client.removeAssetsFromAlbum(ids: serverIDs, albumID: serverAlbum.id)
-        } catch {
-          errors.append("云端移出失败：\(error.localizedDescription)")
-        }
-      }
-    }
-
-    if let localAlbum = entry.device {
-      let localIDs = targets.compactMap { $0.local?.id }
-      if !localIDs.isEmpty {
-        let ok = await device.removeAssets(localIDs, fromAlbum: localAlbum.id)
-        if !ok {
-          errors.append("本机相册移出失败：请检查照片权限")
-        }
-      }
-    }
-
-    selectedIDs.removeAll()
-    isSelecting = false
-    device.refresh()
+  private func reload() async {
     if let id = entry.server?.id { await model.load(albumId: id, reset: true) }
-
-    if !errors.isEmpty {
-      deletionError = errors.joined(separator: "\n")
-    }
-  }
-
-  private func deleteSelectedPhotos(scope: NativeDeleteTargetScope = .all) async {
-    pendingDeleteScope = scope
-    guard !isDeleting else { return }
-    let targets = selectedTargets
-    guard !targets.isEmpty else { return }
-    if targets.contains(where: { $0.local != nil }) {
-      pendingDeleteScope = scope
-      showLocalDeleteWarning = true
-      return
-    }
-    await performSelectedDeletion(targets: targets, scope: scope)
-  }
-
-  private func performSelectedDeletion(targets: [NativeGridItem], scope: NativeDeleteTargetScope) async {
-    guard !isDeleting, !targets.isEmpty else { return }
-    isDeleting = true
-    defer { isDeleting = false }
-    do {
-      try await nativeDeleteGridItems(targets, scope: scope, client: client, device: device)
-      if scope != .localOnly {
-        let deletedIDs = Set(targets.compactMap { $0.server?.id })
-        NativeSyncCacheStore.shared.removeMatches(localIDs: Set(targets.compactMap { item in
-          guard let local = item.local, let serverID = NativeSyncCacheStore.shared.serverID(for: local.id),
-                deletedIDs.contains(serverID) else { return nil }
-          return local.id
-        }))
-      }
-      selectedIDs.removeAll()
-      isSelecting = false
-      device.refresh()
-      if let id = entry.server?.id { await model.load(albumId: id, reset: true) }
-    } catch {
-      if let partial = error as? NativeDeleteOperationError {
-        NativeSyncCacheStore.shared.removeMatches(localIDs: Set(targets.compactMap { item in
-          guard let local = item.local, let serverID = NativeSyncCacheStore.shared.serverID(for: local.id),
-                partial.deletedServerIDs.contains(serverID) else { return nil }
-          return local.id
-        }))
-      }
-      deletionError = "可能已有部分照片删除成功，请刷新确认。\(error.localizedDescription)"
-      device.refresh()
-      if let id = entry.server?.id { await model.load(albumId: id, reset: true) }
-    }
-  }
-
-  private func triggerBatchShare() {
-    guard !isPreparingBatchShare else { return }
-    let targets = selectedTargets
-    guard !targets.isEmpty else { return }
-    isPreparingBatchShare = true
-    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    Task {
-      let result = await nativePrepareBatchShare(items: targets, client: client)
-      await MainActor.run {
-        isPreparingBatchShare = false
-        if !result.files.isEmpty {
-          batchShareItems = result.files
-          if result.failed > 0 { deletionError = "已准备 \(result.files.count) 项原件；\(result.failed) 项暂不可用。" }
-        }
-      }
-    }
+    device.refresh()
   }
 }
 
@@ -3682,7 +3455,7 @@ private struct NativeLibraryView: View {
           }
 
           NavigationLink {
-            NativeMemoriesView(client: client)
+            NativeMemoriesView(client: client, device: device)
           } label: {
             Label("回忆", systemImage: "sparkles")
           }

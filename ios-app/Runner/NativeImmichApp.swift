@@ -1496,6 +1496,7 @@ struct NativePhotosView: View {
   @State private var selectedIDs: Set<String> = []
   @State private var isSelecting = false
   @State private var isDragSelecting = false
+  @GestureState private var photoSelectionDragActive = false
   @State private var dragSelectionIntent: NativeDragSelectionIntent = .undecided
   @State private var isMagnifying = false
   @State private var dragInitialSelectedIDs: Set<String> = []
@@ -2050,6 +2051,7 @@ struct NativePhotosView: View {
         }
         .simultaneousGesture(
           DragGesture(minimumDistance: 4, coordinateSpace: .named("photosScrollSpace"))
+            .updating($photoSelectionDragActive) { _, active, _ in active = true }
             .onChanged { drag in
               if !isSelecting {
                 // The loading overlay is not a user scroll of the photo grid.
@@ -2085,6 +2087,13 @@ struct NativePhotosView: View {
               }
             }
         )
+        .onChange(of: photoSelectionDragActive) { active in
+          if !active {
+            isDragSelecting = false
+            dragSelectionIntent = .undecided
+            finishDragSelection()
+          }
+        }
         .background(Color(uiColor: .systemBackground))
         .simultaneousGesture(
           MagnificationGesture()
@@ -2357,19 +2366,16 @@ struct NativePhotosView: View {
           // especially at the latest/bottom edge. Do not scrollTo to compensate:
           // centering a nearby asset also loses the user's exact pixel offset.
           ZStack(alignment: .bottom) {
-            HStack(spacing: 0) {
-              batchActionButton("square.and.arrow.up", label: "分享", disabled: selectedIDs.isEmpty || isPreparingBatchShare) { triggerBatchShare() }
-              batchActionButton("heart", label: "收藏", disabled: selectedIDs.isEmpty) { Task { await updateBatchFavorites() } }
-              batchActionButton("archivebox", label: "归档", disabled: !selectedItems.contains(where: { $0.server != nil })) { Task { await archiveSelected() } }
-              batchActionButton("plus.rectangle.on.folder", label: "加入相册", disabled: !selectedItems.contains(where: { $0.server != nil || $0.local != nil })) { showAlbumTargetDialog = true }
-              batchActionButton("square.and.arrow.down", label: "保存", disabled: !selectedItems.contains(where: { $0.server != nil })) { prepareSaveToDevice() }
-              batchActionButton("trash", label: "删除", disabled: selectedIDs.isEmpty || isDeleting, destructive: true) {
-                showDeleteConfirmation = true
-              }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
+            NativePhotoBatchToolbar(
+              count: selectedIDs.count, hasServer: selectedItems.contains { $0.server != nil },
+              busy: isPreparingBatchShare || isDeleting,
+              share: triggerBatchShare,
+              favorite: { Task { await updateBatchFavorites() } },
+              archive: { Task { await archiveSelected() } },
+              addToAlbum: { showAlbumTargetDialog = true },
+              save: prepareSaveToDevice,
+              delete: { showDeleteConfirmation = true }
+            )
             .opacity(isSelecting ? 1 : 0)
             .allowsHitTesting(isSelecting)
             .accessibilityHidden(!isSelecting)
@@ -2743,21 +2749,6 @@ struct NativePhotosView: View {
       }
       loadingMatchedServerIDs.remove(id)
     }
-  }
-
-  private func batchActionButton(_ symbol: String, label: String, disabled: Bool, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      VStack(spacing: 3) {
-        Image(systemName: symbol).font(.system(size: 18, weight: .medium))
-        Text(label).font(.system(size: 10, weight: .medium))
-      }
-      .foregroundColor(disabled ? .secondary : (destructive ? .red : .primary))
-      .frame(maxWidth: .infinity, minHeight: 42)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(disabled)
-    .accessibilityLabel(label)
   }
 
   private var selectionSpansBothSources: Bool {
@@ -3284,48 +3275,13 @@ struct NativePhotosView: View {
   }
 
   private func handle2DDragSelection(at location: CGPoint) {
-    guard isSelecting else { return }
-    if dragStartLocation == nil {
-      dragStartLocation = location
-      dragInitialSelectedIDs = selectedIDs
-      if let hitID = itemBounds.first(where: { $0.value.contains(location) })?.key {
-        dragStartAssetID = hitID
-        dragSelectMode = !selectedIDs.contains(hitID)
-      } else {
-        dragSelectMode = true
-      }
-    }
-    
-    let startLoc = dragStartLocation ?? location
-    let minX = min(startLoc.x, location.x)
-    let minY = min(startLoc.y, location.y)
-    let maxX = max(startLoc.x, location.x)
-    let maxY = max(startLoc.y, location.y)
-    
-    let selectionRect = CGRect(
-      x: minX,
-      y: minY,
-      width: max(maxX - minX, 6),
-      height: max(maxY - minY, 6)
+    guard isSelecting, let startID = dragStartAssetID else { return }
+    let ordered = allOrderedAssetIDs
+    guard let endID = nativeSelectionHitID(at: location, orderedIDs: ordered, frames: itemBounds) else { return }
+    let updated = nativeContinuousSelection(
+      orderedIDs: ordered, baseline: dragInitialSelectedIDs,
+      startID: startID, endID: endID, selecting: dragSelectMode
     )
-    
-    var itemsInRect = Set<String>()
-    for (id, frame) in itemBounds {
-      if frame.intersects(selectionRect) {
-        itemsInRect.insert(id)
-      }
-    }
-    if let startID = dragStartAssetID {
-      itemsInRect.insert(startID)
-    }
-    
-    var updated = dragInitialSelectedIDs
-    if dragSelectMode {
-      updated.formUnion(itemsInRect)
-    } else {
-      updated.subtract(itemsInRect)
-    }
-    
     if updated != selectedIDs {
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       selectedIDs = updated
@@ -3401,7 +3357,7 @@ struct NativeDayGroup {
   let assets: [NativeGridItem]
 }
 
-private struct NativePhotosLocalAlbumPicker: View {
+struct NativePhotosLocalAlbumPicker: View {
   let albums: [NativeDeviceAlbum]
   let onSelect: (String) -> Void
   @Environment(\.dismiss) private var dismiss
@@ -3426,7 +3382,7 @@ private struct NativePhotosLocalAlbumPicker: View {
   }
 }
 
-private struct NativePhotosServerAlbumPicker: View {
+struct NativePhotosServerAlbumPicker: View {
   let client: NativeImmichClient
   let onSelect: (String) -> Void
   @Environment(\.dismiss) private var dismiss

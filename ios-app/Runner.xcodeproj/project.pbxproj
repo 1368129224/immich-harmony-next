@@ -18,6 +18,7 @@
 		A41000000000000000000009 /* NativeCachedTimelinePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4100000000000000000000A /* NativeCachedTimelinePreview.swift */; };
 		A4100000000000000000000B /* ImmichCoreBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4100000000000000000000C /* ImmichCoreBridge.swift */; };
 		A4100000000000000000000F /* NativeBackupEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000000000000000000010 /* NativeBackupEngine.swift */; };
+		A41000000000000000000011 /* NativeCollectionBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41000000000000000000012 /* NativeCollectionBrowser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,6 +48,7 @@
 		A4100000000000000000000D /* immich_core_ffi.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = immich_core_ffi.h; sourceTree = "<group>"; };
 		A4100000000000000000000E /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		A41000000000000000000010 /* NativeBackupEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBackupEngine.swift; sourceTree = "<group>"; };
+		A41000000000000000000012 /* NativeCollectionBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCollectionBrowser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +102,7 @@
 				A4100000000000000000000A /* NativeCachedTimelinePreview.swift */,
 				A4100000000000000000000C /* ImmichCoreBridge.swift */,
 				A41000000000000000000010 /* NativeBackupEngine.swift */,
+				A41000000000000000000012 /* NativeCollectionBrowser.swift */,
 				A4100000000000000000000D /* immich_core_ffi.h */,
 				A4100000000000000000000E /* Runner-Bridging-Header.h */,
 			);
@@ -222,6 +225,7 @@
 				A41000000000000000000009 /* NativeCachedTimelinePreview.swift in Sources */,
 				A4100000000000000000000B /* ImmichCoreBridge.swift in Sources */,
 				A4100000000000000000000F /* NativeBackupEngine.swift in Sources */,
+				A41000000000000000000011 /* NativeCollectionBrowser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
