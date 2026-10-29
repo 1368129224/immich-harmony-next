@@ -570,6 +570,65 @@ struct NativeMemoryCoverThumb: View {
   }
 }
 
+// MARK: - On-this-day filtering (Foundation-only)
+func nativeMemoryDayKey(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> String {
+  let parts = calendar.dateComponents([.year, .month, .day], from: date)
+  return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+}
+
+private func nativeMemoryDateParts(_ raw: String, calendar: Calendar, wallClock: Bool = false) -> DateComponents? {
+  if wallClock || raw.count == 10 {
+    // localDateTime is the photographer's wall-clock date; don't shift it by
+    // converting a synthetic UTC offset into the current device time zone.
+    let fields = raw.prefix(10).split(separator: "-").compactMap { Int($0) }
+    guard fields.count == 3 else { return nil }
+    let parts = DateComponents(year: fields[0], month: fields[1], day: fields[2])
+    guard let date = calendar.date(from: parts) else { return nil }
+    let checked = calendar.dateComponents([.year, .month, .day], from: date)
+    guard checked.year == parts.year, checked.month == parts.month,
+          checked.day == parts.day else { return nil }
+    return parts
+  }
+  let formatter = ISO8601DateFormatter()
+  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  var date = formatter.date(from: raw)
+  if date == nil {
+    formatter.formatOptions = [.withInternetDateTime]
+    date = formatter.date(from: raw)
+  }
+  return date.map { calendar.dateComponents([.year, .month, .day], from: $0) }
+}
+
+func nativeMemoriesOnThisDay(
+  _ rows: [[String: Any]], now: Date = Date(), calendar: Calendar = .autoupdatingCurrent
+) -> [[String: Any]] {
+  let today = calendar.dateComponents([.year, .month, .day], from: now)
+  return rows.compactMap { row -> [String: Any]? in
+    guard row["type"] as? String == "on_this_day",
+          let raw = row["memoryAt"] as? String,
+          let day = nativeMemoryDateParts(raw, calendar: calendar),
+          day.month == today.month, day.day == today.day else { return nil }
+    let year = (row["data"] as? [String: Any])?["year"] as? Int ?? day.year ?? 0
+    guard year > 0, year < (today.year ?? 0) else { return nil }
+    let assets = (row["assets"] as? [[String: Any]] ?? []).filter { asset in
+      let parts: DateComponents?
+      if let local = asset["localDateTime"] as? String {
+        parts = nativeMemoryDateParts(local, calendar: calendar, wallClock: true)
+      } else if let taken = asset["fileCreatedAt"] as? String {
+        parts = nativeMemoryDateParts(taken, calendar: calendar)
+      } else { return false }
+      guard let parts else { return false }
+      return parts.month == today.month && parts.day == today.day &&
+        (parts.year ?? 0) > 0 && (parts.year ?? 0) < (today.year ?? 0)
+    }
+    guard !assets.isEmpty else { return nil }
+    var result = row
+    result["assets"] = assets
+    return result
+  }
+}
+// MARK: - Memories UI
+
 struct NativeMemoriesView: View {
   let client: NativeImmichClient
   @State private var memories: [[String: Any]] = []
@@ -584,7 +643,7 @@ struct NativeMemoriesView: View {
         Button("重试") { Task { await load() } }
       }
       if !loading && error == nil && memories.isEmpty {
-        Text("暂无回忆").foregroundColor(.secondary)
+        Text("暂无往年今天的回忆").foregroundColor(.secondary)
       }
       ForEach(memories.indices, id: \.self) { index in
         let memory = memories[index]
@@ -630,7 +689,14 @@ struct NativeMemoriesView: View {
     loading = true
     defer { loading = false }
     do {
-      memories = try await client.libraryRows("memories")
+      let today = Date()
+      let rows = try await client.libraryRows("memories", query: [
+        URLQueryItem(name: "for", value: nativeMemoryDayKey(for: today)),
+        URLQueryItem(name: "type", value: "on_this_day"),
+      ])
+      // Servers may keep several days' memories visible. The server query is
+      // only a first pass; enforce today's anniversary on cards AND members.
+      memories = nativeMemoriesOnThisDay(rows, now: today)
       error = nil
     } catch {
       self.error = error.localizedDescription

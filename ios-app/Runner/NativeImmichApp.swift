@@ -510,8 +510,9 @@ final class NativeImmichClient {
     catch { throw NativeAPIError.invalidJSON(path) }
   }
 
-  func timelineBuckets() async throws -> [NativeBucket] {
-    if ImmichCoreBridge.shared.isInitialized {
+  func timelineBuckets(orderBy: NativeTimelineOrderBy = .takenAt) async throws -> [NativeBucket] {
+    // Core's cached buckets are keyed by date taken, never by date added.
+    if orderBy == .takenAt && ImmichCoreBridge.shared.isInitialized {
       do {
         let coreBuckets = try await ImmichCoreBridge.shared.syncAndGetBuckets()
         if !coreBuckets.isEmpty {
@@ -525,11 +526,7 @@ final class NativeImmichClient {
     }
     let base = config.apiEndpoint ?? (Self.normalize(config.serverUrl) + "/api")
     guard var components = URLComponents(string: base + "/timeline/buckets") else { throw NativeAPIError.invalidServer }
-    components.queryItems = [
-      URLQueryItem(name: "order", value: "desc"),
-      URLQueryItem(name: "orderBy", value: "takenAt"),
-      URLQueryItem(name: "visibility", value: "timeline"),
-    ]
+    components.queryItems = nativeTimelineQuery(orderBy: orderBy)
     guard let url = components.url else { throw NativeAPIError.invalidServer }
     var request = URLRequest(url: url)
     applyAuth(to: &request)
@@ -543,8 +540,8 @@ final class NativeImmichClient {
     }
   }
 
-  func assets(in bucket: NativeBucket) async throws -> [NativeAsset] {
-    if ImmichCoreBridge.shared.isInitialized {
+  func assets(in bucket: NativeBucket, orderBy: NativeTimelineOrderBy = .takenAt) async throws -> [NativeAsset] {
+    if orderBy == .takenAt && ImmichCoreBridge.shared.isInitialized {
       do {
         let coreAssets = try await ImmichCoreBridge.shared.fetchBucketAssets(timeBucket: bucket.id)
         if !coreAssets.isEmpty {
@@ -558,13 +555,7 @@ final class NativeImmichClient {
     }
     let base = config.apiEndpoint ?? (Self.normalize(config.serverUrl) + "/api")
     guard var components = URLComponents(string: base + "/timeline/bucket") else { throw NativeAPIError.invalidServer }
-    let bucketParam = bucket.id.count == 10 ? "\(bucket.id)T00:00:00.000Z" : bucket.id
-    components.queryItems = [
-      URLQueryItem(name: "timeBucket", value: bucketParam),
-      URLQueryItem(name: "order", value: "desc"),
-      URLQueryItem(name: "orderBy", value: "takenAt"),
-      URLQueryItem(name: "visibility", value: "timeline"),
-    ]
+    components.queryItems = nativeTimelineQuery(orderBy: orderBy, bucketID: bucket.id)
     guard let url = components.url else { throw NativeAPIError.invalidServer }
     var request = URLRequest(url: url)
     applyAuth(to: &request)
@@ -678,19 +669,6 @@ final class NativeImmichClient {
     applyAuth(to: &request)
     let (data, response) = try await nativeData(for: request, using: session)
     try check(response: response, data: data)
-  }
-
-  func recentlyAddedPage(cursor: String? = nil) async throws -> NativeSearchPage {
-    var payload: [String: Any] = [
-      "size": 100,
-      "orderBy": ["field": "createdAt", "direction": "desc"],
-    ]
-    if let cursor { payload["cursor"] = cursor }
-    let result = try await send(path: "search/metadata", method: "POST", body: payload)
-    guard let page = result["assets"] as? [String: Any], let items = page["items"] as? [[String: Any]] else {
-      throw NativeAPIError.invalidResponse
-    }
-    return NativeSearchPage(assets: items.compactMap(Self.decodeAsset), next: page["nextCursor"] as? String)
   }
 
   func restoreTrash(ids: [String]) async throws {

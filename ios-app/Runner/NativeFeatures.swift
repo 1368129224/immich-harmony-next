@@ -972,6 +972,29 @@ private final class NativeResultsModel: ObservableObject {
   }
 }
 
+// MARK: - Timeline request contract (Foundation-only)
+enum NativeTimelineOrderBy: String {
+  case takenAt
+  case createdAt
+}
+
+func nativeTimelineQuery(orderBy: NativeTimelineOrderBy, bucketID: String? = nil) -> [URLQueryItem] {
+  var query = [
+    URLQueryItem(name: "order", value: "desc"),
+    URLQueryItem(name: "orderBy", value: orderBy.rawValue),
+    URLQueryItem(name: "visibility", value: "timeline"),
+  ]
+  if let bucketID {
+    // Keep the existing takenAt request format; date-added buckets use the
+    // YYYY-MM-DD identifier returned by the v3 timeline API unchanged.
+    let value = orderBy == .takenAt && bucketID.count == 10
+      ? "\(bucketID)T00:00:00.000Z" : bucketID
+    query.append(URLQueryItem(name: "timeBucket", value: value))
+  }
+  return query
+}
+// MARK: - Result grids
+
 func nativeSortedResultDays(_ days: [Date], oldestFirst: Bool) -> [Date] {
   days.sorted { oldestFirst ? $0 < $1 : $0 > $1 }
 }
@@ -983,6 +1006,7 @@ struct NativeResultGrid: View {
   let hasOlder: Bool
   var startsAtLatest = false
   var initialPositionReady = true
+  var preservesServerOrder = false
   var isSelectingBinding: Binding<Bool>? = nil
   var selectedIDsBinding: Binding<Set<String>>? = nil
   let loadMore: () -> Void
@@ -1041,6 +1065,7 @@ struct NativeResultGrid: View {
     hasOlder: Bool,
     startsAtLatest: Bool = false,
     initialPositionReady: Bool = true,
+    preservesServerOrder: Bool = false,
     isSelecting: Binding<Bool>? = nil,
     selectedIDs: Binding<Set<String>>? = nil,
     loadMore: @escaping () -> Void
@@ -1051,12 +1076,18 @@ struct NativeResultGrid: View {
     self.hasOlder = hasOlder
     self.startsAtLatest = startsAtLatest
     self.initialPositionReady = initialPositionReady
+    self.preservesServerOrder = preservesServerOrder
     self.isSelectingBinding = isSelecting
     self.selectedIDsBinding = selectedIDs
     self.loadMore = loadMore
   }
 
   private var merged: [NativeGridItem] {
+    // Date-added order belongs to the server. Do not mix in local capture dates
+    // or change the asset's real capture date just to influence grid ordering.
+    if preservesServerOrder {
+      return assets.map { NativeGridItem(server: $0, local: nil) }
+    }
     let matched = NativeSyncCacheStore.shared.matchedServerIDs
     let serverById = Dictionary(assets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -1089,6 +1120,7 @@ struct NativeResultGrid: View {
   }
 
   private var mergedGroups: [Date: [NativeGridItem]] {
+    if preservesServerOrder { return merged.isEmpty ? [:] : [.distantPast: merged] }
     var calendar = Calendar.autoupdatingCurrent
     calendar.timeZone = .autoupdatingCurrent
     return Dictionary(grouping: merged) { calendar.startOfDay(for: $0.date) }
@@ -1107,7 +1139,9 @@ struct NativeResultGrid: View {
             id: \.self
           ) { day in
           VStack(alignment: .leading, spacing: 2) {
-            Text(NativeImmichClient.formatChineseDate(day)).font(.headline).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+            if !preservesServerOrder {
+              Text(NativeImmichClient.formatChineseDate(day)).font(.headline).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+            }
             let gridSpacing: CGFloat = columns > 7 ? 1 : 2
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns), spacing: gridSpacing) {
               ForEach(mergedGroups[day] ?? []) { entry in
@@ -3642,7 +3676,7 @@ private struct NativeLibraryView: View {
           }
 
           NavigationLink {
-            NativeRecentlyAddedView(client: client, device: device)
+            NativeRecentlyAddedView(client: client)
           } label: {
             Label("最近添加", systemImage: "clock.arrow.circlepath")
           }
@@ -4087,16 +4121,19 @@ struct NativeFilteredView: View {
 
 struct NativeRecentlyAddedView: View {
   let client: NativeImmichClient
-  @ObservedObject var device: NativeDeviceLibrary
   @State private var serverAssets: [NativeAsset] = []
-  @State private var localAssets: [NativeDeviceAsset] = []
-  @State private var nextCursor: String?
+  @State private var buckets: [NativeBucket] = []
+  @State private var nextBucket = 0
   @State private var isLoading = false
   @State private var error: String?
   @State private var loaded = false
 
   var body: some View {
     VStack {
+      Text("云端照片 · 按添加到服务器的时间倒序")
+        .font(.footnote)
+        .foregroundColor(.secondary)
+        .padding(6)
       if let error {
         HStack {
           Text(error).font(.caption).foregroundColor(.red)
@@ -4104,12 +4141,14 @@ struct NativeRecentlyAddedView: View {
         }
         .padding(6)
       }
+      if loaded && !isLoading && error == nil && serverAssets.isEmpty {
+        Text("暂无最近添加的云端照片").foregroundColor(.secondary)
+      }
       NativeResultGrid(
         client: client,
         assets: serverAssets,
-        localAssets: localAssets,
-        hasOlder: nextCursor != nil,
-        startsAtLatest: false
+        hasOlder: nextBucket < buckets.count,
+        preservesServerOrder: true
       ) {
         Task { await loadMore() }
       }
@@ -4122,36 +4161,49 @@ struct NativeRecentlyAddedView: View {
         await reload()
       }
     }
-    .refreshable {
-      await reload()
-    }
+    .refreshable { await reload() }
   }
 
   private func reload() async {
+    guard !isLoading else { return }
     isLoading = true
     defer { isLoading = false }
     error = nil
-    localAssets = device.assets.sorted { $0.date > $1.date }
     do {
-      let page = try await client.recentlyAddedPage()
-      serverAssets = page.assets
-      nextCursor = page.next
+      let response = try await client.timelineBuckets(orderBy: .createdAt)
+      try Task.checkCancellation()
+      buckets = response.sorted { $0.id > $1.id }
+      nextBucket = 0
+      serverAssets = []
+      try await appendNextBucket()
+    } catch is CancellationError {
+      // Allow another load when a cancelled initial task reappears.
+      loaded = false
     } catch {
       self.error = error.localizedDescription
     }
   }
 
   private func loadMore() async {
-    guard let cursor = nextCursor, !isLoading else { return }
+    guard nextBucket < buckets.count, !isLoading, error == nil else { return }
     isLoading = true
     defer { isLoading = false }
-    do {
-      let page = try await client.recentlyAddedPage(cursor: cursor)
+    do { try await appendNextBucket() }
+    catch is CancellationError { }
+    catch { self.error = error.localizedDescription }
+  }
+
+  private func appendNextBucket() async throws {
+    // Advance only after a successful response; empty buckets must not strand
+    // pagination behind a spinner that can no longer trigger onAppear.
+    while nextBucket < buckets.count {
+      let page = try await client.assets(in: buckets[nextBucket], orderBy: .createdAt)
+      try Task.checkCancellation()
       var ids = Set(serverAssets.map(\.id))
-      serverAssets += page.assets.filter { ids.insert($0.id).inserted }
-      nextCursor = page.assets.isEmpty || page.next == cursor ? nil : page.next
-    } catch {
-      self.error = error.localizedDescription
+      let newAssets = page.filter { ids.insert($0.id).inserted }
+      serverAssets += newAssets
+      nextBucket += 1
+      if !newAssets.isEmpty { return }
     }
   }
 }
