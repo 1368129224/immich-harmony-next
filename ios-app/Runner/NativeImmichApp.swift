@@ -4035,7 +4035,8 @@ private struct NativeViewerDismissCompletion: AnimatableModifier {
       progress = newValue
       if newValue == 1 {
         // Never mutate SwiftUI state during an animation/layout update.
-        DispatchQueue.main.async { onCompleted() }
+        let completion = onCompleted
+        DispatchQueue.main.async(execute: completion)
       }
     }
   }
