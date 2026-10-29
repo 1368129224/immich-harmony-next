@@ -3464,7 +3464,7 @@ private struct NativePhotosPageSettingsView: View {
 
   var body: some View {
     List {
-      Section("分享设置", footer: Text("关闭后分享照片将自动去除 GPS 坐标，保护地理位置隐私。")) {
+      Section(header: Text("分享设置"), footer: Text("关闭后分享照片将自动去除 GPS 坐标，保护地理位置隐私。")) {
         Toggle("分享时保留位置信息 (GPS)", isOn: $shareIncludeGPS)
       }
 
