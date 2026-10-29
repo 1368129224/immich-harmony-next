@@ -3815,8 +3815,8 @@ private final class NativeViewerDismissFinderView: UIView {
 private struct NativeViewerDismissHelper: UIViewRepresentable {
   let isZoomed: Bool
   let isFinishing: Bool
-  let onDragChanged: (CGFloat) -> Void
-  let onDragEnded: (CGFloat, CGFloat) -> Void
+  let onDragChanged: (CGFloat, CGFloat) -> Void
+  let onDragEnded: (CGFloat, CGFloat, CGFloat, CGFloat) -> Void
 
   func makeCoordinator() -> Coordinator {
     Coordinator(
@@ -3856,8 +3856,8 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
   final class Coordinator: NSObject, UIGestureRecognizerDelegate {
     var isZoomed: Bool
     var isFinishing: Bool
-    var onDragChanged: (CGFloat) -> Void
-    var onDragEnded: (CGFloat, CGFloat) -> Void
+    var onDragChanged: (CGFloat, CGFloat) -> Void
+    var onDragEnded: (CGFloat, CGFloat, CGFloat, CGFloat) -> Void
 
     private weak var panGesture: UIPanGestureRecognizer?
     private weak var pagingScrollView: UIScrollView?
@@ -3866,8 +3866,8 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
     init(
       isZoomed: Bool,
       isFinishing: Bool,
-      onDragChanged: @escaping (CGFloat) -> Void,
-      onDragEnded: @escaping (CGFloat, CGFloat) -> Void
+      onDragChanged: @escaping (CGFloat, CGFloat) -> Void,
+      onDragEnded: @escaping (CGFloat, CGFloat, CGFloat, CGFloat) -> Void
     ) {
       self.isZoomed = isZoomed
       self.isFinishing = isFinishing
@@ -3966,16 +3966,16 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
           }
         }
         if translation.y > 0 {
-          onDragChanged(translation.y)
+          onDragChanged(translation.x, translation.y)
         }
       case .changed:
         if translation.y > 0 {
-          onDragChanged(translation.y)
+          onDragChanged(translation.x, translation.y)
         } else {
-          onDragChanged(0)
+          onDragChanged(0, 0)
         }
       case .ended, .cancelled:
-        onDragEnded(translation.y, velocity.y)
+        onDragEnded(translation.x, translation.y, velocity.x, velocity.y)
       default:
         break
       }
@@ -4027,38 +4027,62 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
   var onSwipeUp: (() -> Void)? = nil
   let onDismiss: () -> Void
 
+  @State private var dragX: CGFloat = 0
   @State private var dragY: CGFloat = 0
-  @State private var dismissScaleX: CGFloat = 1
-  @State private var dismissScaleY: CGFloat = 1
+  @State private var dismissScale: CGFloat = 1
   @State private var dismissX: CGFloat = 0
+  @State private var dismissY: CGFloat = 0
+  @State private var dismissCornerRadius: CGFloat = 0
   @State private var backdropOpacity: Double = 1
   @State private var pagerOpacity: Double = 1
   @State private var finishing = false
 
+  private var dragProgress: CGFloat {
+    min(1.0, max(0.0, dragY / 320.0))
+  }
+
+  private var interactiveScale: CGFloat {
+    1.0 - dragProgress * 0.28
+  }
+
+  private var interactiveCornerRadius: CGFloat {
+    dragProgress * 36.0
+  }
+
+  private var interactiveShadowOpacity: Double {
+    min(0.28, Double(dragProgress) * 0.28)
+  }
+
   var body: some View {
     ZStack {
       (showsChrome ? Color(uiColor: .systemBackground) : Color.black)
-        .opacity(backdropOpacity * max(0, 1 - Double(dragY / 320)))
+        .opacity(backdropOpacity * max(0, 1 - Double(dragY / 350)))
         .ignoresSafeArea()
+
       pager
         .opacity(pagerOpacity)
-        .scaleEffect(x: dismissScaleX, y: dismissScaleY)
-        .offset(x: dismissX, y: dragY)
+        .clipShape(RoundedRectangle(cornerRadius: finishing ? dismissCornerRadius : interactiveCornerRadius, style: .continuous))
+        .shadow(color: Color.black.opacity(finishing ? 0 : interactiveShadowOpacity), radius: 18, y: 8)
+        .scaleEffect(finishing ? dismissScale : interactiveScale)
+        .offset(x: finishing ? dismissX : (dragX * 0.35), y: finishing ? dismissY : dragY)
         .background(
           NativeViewerDismissHelper(
             isZoomed: isZoomed,
             isFinishing: finishing,
-            onDragChanged: { y in
+            onDragChanged: { x, y in
+              dragX = x
               dragY = max(0, y)
             },
-            onDragEnded: { translationY, velocityY in
-              handleDragEnded(translationY: translationY, velocityY: velocityY)
+            onDragEnded: { translationX, translationY, velocityX, velocityY in
+              handleDragEnded(translationX: translationX, translationY: translationY, velocityX: velocityX, velocityY: velocityY)
             }
           )
         )
+
       if showsChrome && !finishing {
         chrome
-          .opacity(backdropOpacity * max(0, 1 - Double(dragY / 60)))
+          .opacity(backdropOpacity * max(0, 1 - Double(dragY / 45)))
+          .allowsHitTesting(dragY < 10)
           .transition(.opacity)
       }
     }
@@ -4068,26 +4092,31 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
     }
   }
 
-  private func handleDragEnded(translationY: CGFloat, velocityY: CGFloat) {
+  private func handleDragEnded(translationX: CGFloat, translationY: CGFloat, velocityX: CGFloat, velocityY: CGFloat) {
     guard !finishing else { return }
     if isZoomed {
-      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
+      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+        dragX = 0; dragY = 0
+      }
       return
     }
-    let predictedEnd = CGSize(width: 0, height: translationY + velocityY * 0.2)
+    let predictedEnd = CGSize(width: translationX + velocityX * 0.2, height: translationY + velocityY * 0.2)
     let action = nativeClassifyViewerVerticalSwipe(
-      translation: CGSize(width: 0, height: translationY),
+      translation: CGSize(width: translationX, height: translationY),
       predictedEnd: predictedEnd
     )
     if action == .showDetails {
       onSwipeUp?()
-      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) { dragY = 0 }
+      withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+        dragX = 0; dragY = 0
+      }
       return
     }
     if action == .dismiss {
       finishDismiss(swipingDown: true)
     } else {
       withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+        dragX = 0
         dragY = 0
       }
     }
@@ -4095,34 +4124,38 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
 
   private func finishDismiss(swipingDown: Bool) {
     guard !finishing else { return }
+    dismissScale = interactiveScale
+    dismissX = dragX * 0.35
+    dismissY = dragY
+    dismissCornerRadius = interactiveCornerRadius
     finishing = true
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     let screen = UIScreen.main.bounds
-    withAnimation(.easeOut(duration: 0.22)) {
+    let target = nativeViewerVisibleSourceFrame(sourceFrame, in: screen)
+
+    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
       backdropOpacity = 0
-      if swipingDown {
-        // 下滑关闭：沿手势方向顺滑滑出屏幕底部，避免与缩略图位移冲突
-        dragY = screen.height + 80
+      if let target {
+        let scale = min(target.width / screen.width, target.height / screen.height)
+        dismissScale = scale
+        dismissX = target.midX - screen.midX
+        dismissY = target.midY - screen.midY
+        dismissCornerRadius = 4
+      } else if swipingDown {
+        dismissY = screen.height + 80
+        dismissScale = 0.65
+        dismissCornerRadius = 36
       } else {
-        // 点击返回按钮：若缩略图在屏幕内则等比缩放回原位，否则淡出
-        if let target = nativeViewerVisibleSourceFrame(sourceFrame, in: screen) {
-          let scale = min(target.width / screen.width, target.height / screen.height)
-          dismissScaleX = scale
-          dismissScaleY = scale
-          dismissX = target.midX - screen.midX
-          dragY = target.midY - screen.midY
-        } else {
-          pagerOpacity = 0
-        }
+        pagerOpacity = 0
       }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onDismiss() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { onDismiss() }
   }
 }
 
 func nativeViewerVisibleSourceFrame(_ source: CGRect?, in screen: CGRect) -> CGRect? {
   guard let source, source.width > 0, source.height > 0,
-        screen.contains(source) else { return nil }
+        screen.intersects(source) else { return nil }
   return source
 }
 
@@ -4256,7 +4289,7 @@ struct NativeUnifiedGalleryViewer: View {
   @State private var dontRemindTrashSelected = false
   @State private var isDeletingItem = false
   @State private var deleteErrorMessage: String? = nil
-  @State private var showShareOptionsDialog = false
+  @AppStorage("immichz_share_include_gps") private var shareIncludeGPS = true
   @State private var isSavingToDevice = false
   @State private var showAlbumTargetDialog = false
   @State private var showLocalAlbumPicker = false
@@ -4492,28 +4525,6 @@ struct NativeUnifiedGalleryViewer: View {
     } message: {
       Text("该照片尚未同步到云端，删除后仅从本地设备相册中移除。")
     }
-    .confirmationDialog("选择分享方式", isPresented: $showShareOptionsDialog, titleVisibility: .visible) {
-      Button("原件（保留 GPS 位置）") {
-        executeShare(format: .original, removeGPS: false)
-      }
-      Button("原件（去除 GPS 位置）") {
-        executeShare(format: .original, removeGPS: true)
-      }
-      Button("兼容副本 JPEG（保留 GPS 位置）") {
-        executeShare(format: .compatible, removeGPS: false)
-      }
-      Button("兼容副本 JPEG（去除 GPS 位置）") {
-        executeShare(format: .compatible, removeGPS: true)
-      }
-      if currentItem?.server != nil {
-        Button("复制云端访问链接") {
-          executeShare(format: .cloudLink, removeGPS: false)
-        }
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("请选择分享原件、兼容副本或云端链接。可按需去除 GPS 地理位置以保护隐私。")
-    }
     .alert("删除失败", isPresented: Binding(get: { deleteErrorMessage != nil }, set: { if !$0 { deleteErrorMessage = nil } })) {
       Button("确定", role: .cancel) { deleteErrorMessage = nil }
     } message: {
@@ -4664,13 +4675,13 @@ struct NativeUnifiedGalleryViewer: View {
 
       // Bottom Bar (所有操作按钮完整展开排布在磨砂胶囊中，均分排布，无“更多”折叠)
       HStack(spacing: 0) {
-        // 分享
+        // 分享 (直接调用，按设置自动决定是否保留 GPS)
         viewerBottomActionButton(
           systemName: "square.and.arrow.up",
           title: isPreparingShare ? "准备中" : "分享",
           disabled: isPreparingShare,
           showSpinner: isPreparingShare,
-          action: { showShareOptionsDialog = true }
+          action: { executeShare(removeGPS: !shareIncludeGPS) }
         )
 
         // 存到相册 (仅云端存在且本地无时)
@@ -4879,18 +4890,8 @@ struct NativeUnifiedGalleryViewer: View {
     }
   }
 
-  private func executeShare(format: NativeShareFormatMode, removeGPS: Bool) {
+  private func executeShare(removeGPS: Bool) {
     guard let item = currentItem, !isPreparingShare else { return }
-    if format == .cloudLink {
-      guard let server = item.server else {
-        viewerMessage = "该照片尚未同步到云端，无法生成云端链接，需先手动备份或分享本地副本。"
-        return
-      }
-      let shareUrl = "\(client.config.serverUrl)/photos/\(server.id)"
-      UIPasteboard.general.string = shareUrl
-      viewerMessage = "云端照片链接已复制到剪贴板：\n\(shareUrl)"
-      return
-    }
 
     isPreparingShare = true
     let preparationID = UUID()
@@ -4921,10 +4922,7 @@ struct NativeUnifiedGalleryViewer: View {
           throw NativeShareError.originalUnavailable
         }
 
-        // Apply format conversion or GPS stripping
-        if format == .compatible {
-          fileURL = (try? nativeCompatibleCopy(for: fileURL, removeGPS: removeGPS)) ?? fileURL
-        } else if removeGPS {
+        if removeGPS {
           fileURL = (try? nativeStripGPSFromImageFile(at: fileURL)) ?? fileURL
         }
 

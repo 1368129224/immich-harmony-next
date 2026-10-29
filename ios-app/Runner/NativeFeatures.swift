@@ -3449,6 +3449,7 @@ private struct NativePhotosPageSettingsView: View {
   @ObservedObject var device: NativeDeviceLibrary
   @AppStorage("immichz_photos_excluded_local_album_ids") private var excludedLocalIDsRaw = "[]"
   @AppStorage("immichz_photos_excluded_server_album_ids") private var excludedServerIDsRaw = "[]"
+  @AppStorage("immichz_share_include_gps") private var shareIncludeGPS = true
   @State private var serverAlbums: [NativeServerAlbum] = []
   @State private var serverError: String?
   @State private var isLoadingServerAlbums = false
@@ -3463,6 +3464,10 @@ private struct NativePhotosPageSettingsView: View {
 
   var body: some View {
     List {
+      Section("分享设置", footer: Text("关闭后分享照片将自动去除 GPS 坐标，保护地理位置隐私。")) {
+        Toggle("分享时保留位置信息 (GPS)", isOn: $shareIncludeGPS)
+      }
+
       Section {
         Text("关闭相册开关后，该相册中的照片将从照片页隐藏；相册内照片若同时属于其他相册，也会一并隐藏。未归入相册的照片仍会显示。")
           .font(.footnote)
@@ -3549,6 +3554,7 @@ private struct NativeLibraryView: View {
   @ObservedObject var device: NativeDeviceLibrary
   @ObservedObject var matchedAssetDiagnostics: NativeMatchedAssetDiagnostics
   @AppStorage("immichz_merge_albums") private var mergeAlbums = true
+  @AppStorage("immichz_share_include_gps") private var shareIncludeGPS = true
   @State private var features: [String: Any] = [:]
   @State private var showDebugSheet = false
   @State private var versionTapCount = 0
@@ -3676,6 +3682,7 @@ private struct NativeLibraryView: View {
 
         Section("相册与设置") {
           Toggle("合并本地和远端相册", isOn: $mergeAlbums)
+          Toggle("分享时保留位置信息 (GPS)", isOn: $shareIncludeGPS)
           NavigationLink("照片页设置") {
             NativePhotosPageSettingsView(client: client, device: device)
           }

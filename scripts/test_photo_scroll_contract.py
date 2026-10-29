@@ -102,11 +102,9 @@ class PhotoScrollContractTests(unittest.TestCase):
         # Live Photo missing resource truthful indication
         self.assertIn("liveResourceMissing", single_page)
         self.assertIn("实况动态资源暂不可用或缺失", single_page)
-        # Share options: Original, Compatible, Cloud Link, GPS options
-        self.assertIn("原件（保留 GPS 位置）", viewer)
-        self.assertIn("原件（去除 GPS 位置）", viewer)
-        self.assertIn("兼容副本 JPEG", viewer)
-        self.assertIn("复制云端访问链接", viewer)
+        # One-tap direct share with GPS preference
+        self.assertIn("shareIncludeGPS", viewer)
+        self.assertIn("executeShare(removeGPS: !shareIncludeGPS)", viewer)
 
     def test_album_and_backup_contracts(self):
         features_source = (ROOT / "ios-app/Runner/NativeFeatures.swift").read_text()
