@@ -57,6 +57,41 @@ class PhotoScrollContractTests(unittest.TestCase):
         # Must not use simultaneous DragGesture on the pager
         self.assertNotIn("simultaneousGesture(\n          DragGesture", surface)
 
+    def test_viewer_dismiss_waits_for_rendered_animation_completion(self):
+        source = (ROOT / "ios-app/Runner/NativeImmichApp.swift").read_text()
+        observer = source.split("private struct NativeViewerDismissCompletion", 1)[1].split(
+            "private struct NativeViewerDismissSurface", 1
+        )[0]
+        surface = source.split("private struct NativeViewerDismissSurface", 1)[1].split(
+            "func nativeViewerVisibleSourceFrame", 1
+        )[0]
+        finish = surface.split("private func finishDismiss", 1)[1]
+        self.assertIn("AnimatableModifier", observer)
+        self.assertIn("var animatableData: Double", observer)
+        self.assertIn("if newValue == 1", observer)
+        self.assertIn("DispatchQueue.main.async { onCompleted() }", observer)
+        self.assertIn("progress: finishing ? 1 : 0", surface)
+        self.assertIn("guard finishing, !didCompleteDismiss", surface)
+        self.assertNotIn("asyncAfter", finish)
+        self.assertNotIn(".spring(", finish)
+        # Completion progress and card transforms must share one transaction.
+        animation = finish.split("withAnimation(.timingCurve", 1)[1]
+        self.assertIn("finishing = true", animation)
+        self.assertIn("dismissScale = scale", animation)
+        self.assertNotIn("finishing = true", finish.split("withAnimation", 1)[0])
+
+    def test_viewer_dismiss_measures_in_stable_coordinates_and_cancels(self):
+        source = (ROOT / "ios-app/Runner/NativeImmichApp.swift").read_text()
+        helper = source.split("private struct NativeViewerDismissHelper", 1)[1].split(
+            "private struct NativeViewerDismissCompletion", 1
+        )[0]
+        self.assertIn("let coordinateView: UIView = view.window ?? view", helper)
+        self.assertIn("gesture.translation(in: coordinateView)", helper)
+        self.assertIn("gesture.velocity(in: coordinateView)", helper)
+        self.assertNotIn("case .ended, .cancelled:", helper)
+        self.assertIn("case .cancelled, .failed:", helper)
+        self.assertIn("onDragEnded(0, 0, 0, 0)", helper)
+
     def test_viewer_deletion_scenarios_contract(self):
         source = (ROOT / "ios-app/Runner/NativeImmichApp.swift").read_text()
         viewer = source.split("struct NativeUnifiedGalleryViewer", 1)[1]

@@ -3947,8 +3947,11 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
       guard let view = gesture.view else { return }
-      let translation = gesture.translation(in: view)
-      let velocity = gesture.velocity(in: view)
+      // The pager moves and scales during dismissal. Measure in the stable
+      // window coordinate space, not in the animated gesture host's space.
+      let coordinateView: UIView = view.window ?? view
+      let translation = gesture.translation(in: coordinateView)
+      let velocity = gesture.velocity(in: coordinateView)
 
       switch gesture.state {
       case .began:
@@ -3974,8 +3977,11 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
         } else {
           onDragChanged(0, 0)
         }
-      case .ended, .cancelled:
+      case .ended:
         onDragEnded(translation.x, translation.y, velocity.x, velocity.y)
+      case .cancelled, .failed:
+        // A system interruption must restore the viewer, not commit dismissal.
+        onDragEnded(0, 0, 0, 0)
       default:
         break
       }
@@ -4017,6 +4023,26 @@ private struct NativeViewerDismissHelper: UIViewRepresentable {
   }
 }
 
+// iOS 15-compatible completion observation. A wall-clock timer can remove the
+// fullScreenCover before its final rendered frame, especially under load.
+private struct NativeViewerDismissCompletion: AnimatableModifier {
+  var progress: Double
+  let onCompleted: () -> Void
+
+  var animatableData: Double {
+    get { progress }
+    set {
+      progress = newValue
+      if newValue == 1 {
+        // Never mutate SwiftUI state during an animation/layout update.
+        DispatchQueue.main.async { onCompleted() }
+      }
+    }
+  }
+
+  func body(content: Content) -> some View { content }
+}
+
 private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
   let pager: Pager
   let chrome: Chrome
@@ -4036,6 +4062,7 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
   @State private var backdropOpacity: Double = 1
   @State private var pagerOpacity: Double = 1
   @State private var finishing = false
+  @State private var didCompleteDismiss = false
 
   private var dragProgress: CGFloat {
     min(1.0, max(0.0, dragY / 320.0))
@@ -4086,6 +4113,11 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
           .transition(.opacity)
       }
     }
+    .modifier(NativeViewerDismissCompletion(progress: finishing ? 1 : 0) {
+      guard finishing, !didCompleteDismiss else { return }
+      didCompleteDismiss = true
+      onDismiss()
+    })
     .animation(.easeInOut(duration: 0.2), value: showsChrome)
     .onChange(of: dismissRequested) { requested in
       if requested { finishDismiss(swipingDown: false) }
@@ -4128,12 +4160,15 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
     dismissX = dragX * 0.35
     dismissY = dragY
     dismissCornerRadius = interactiveCornerRadius
-    finishing = true
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     let screen = UIScreen.main.bounds
     let target = nativeViewerVisibleSourceFrame(sourceFrame, in: screen)
 
-    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+    // Use a finite, non-overshooting settle curve. The previous spring still
+    // had a visible tail when a separate 0.28 s timer tore down the cover.
+    // Animate the completion observer in this SAME transaction as the card.
+    withAnimation(.timingCurve(0.2, 0.7, 0.25, 1, duration: 0.32)) {
+      finishing = true
       backdropOpacity = 0
       if let target {
         let scale = min(target.width / screen.width, target.height / screen.height)
@@ -4149,7 +4184,6 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
         pagerOpacity = 0
       }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { onDismiss() }
   }
 }
 
