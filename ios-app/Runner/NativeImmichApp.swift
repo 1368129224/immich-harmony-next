@@ -2644,11 +2644,21 @@ struct NativePhotosView: View {
                   proxy.scrollTo(fallbackID, anchor: .center)
                 }
               }
-              activeViewerItem = nil
+              var transaction = Transaction()
+              transaction.disablesAnimations = true
+              withTransaction(transaction) {
+                activeViewerItem = nil
+              }
             },
             onServerAssetUpdated: { model.upsert($0) },
             onServerAssetArchived: { model.removeAssets(ids: [$0]) },
-            onDismissViewer: { activeViewerItem = nil }
+            onDismissViewer: {
+              var transaction = Transaction()
+              transaction.disablesAnimations = true
+              withTransaction(transaction) {
+                activeViewerItem = nil
+              }
+            }
           )
         }
   }
@@ -4088,21 +4098,25 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
     finishing = true
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     let screen = UIScreen.main.bounds
-    let target = nativeViewerVisibleSourceFrame(sourceFrame, in: screen)
-    withAnimation(.easeOut(duration: 0.25)) {
+    withAnimation(.easeOut(duration: 0.22)) {
       backdropOpacity = 0
-      if let target {
-        dismissScaleX = target.width / screen.width
-        dismissScaleY = target.height / screen.height
-        dismissX = target.midX - screen.midX
-        dragY = target.midY - screen.midY
-      } else if swipingDown {
+      if swipingDown {
+        // 下滑关闭：沿手势方向顺滑滑出屏幕底部，避免与缩略图位移冲突
         dragY = screen.height + 80
       } else {
-        pagerOpacity = 0
+        // 点击返回按钮：若缩略图在屏幕内则等比缩放回原位，否则淡出
+        if let target = nativeViewerVisibleSourceFrame(sourceFrame, in: screen) {
+          let scale = min(target.width / screen.width, target.height / screen.height)
+          dismissScaleX = scale
+          dismissScaleY = scale
+          dismissX = target.midX - screen.midX
+          dragY = target.midY - screen.midY
+        } else {
+          pagerOpacity = 0
+        }
       }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onDismiss() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onDismiss() }
   }
 }
 
@@ -4363,15 +4377,12 @@ struct NativeUnifiedGalleryViewer: View {
             showInfoSheet = true
           },
           onDismiss: {
-            // Avoid a second UIKit fullScreenCover transition after the page animation.
-            if let controller = presentedController.value,
-               controller.presentingViewController != nil {
-              controller.dismiss(animated: false) {
-                if let onDismissViewer { onDismissViewer() }
-                else { dismiss() }
-              }
-            } else if let onDismissViewer { onDismissViewer() }
-            else { dismiss() }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+              if let onDismissViewer { onDismissViewer() }
+              else { dismiss() }
+            }
           }
         )
       }
@@ -4631,39 +4642,9 @@ struct NativeUnifiedGalleryViewer: View {
 
         Spacer()
 
-        Menu {
-          Button {
-            showAlbumTargetDialog = true
-          } label: {
-            Label("加入相册", systemImage: "plus.rectangle.on.folder")
-          }
-
-          if currentItem?.server != nil && currentItem?.local == nil {
-            Button {
-              Task { await saveCurrentServerAssetToDevice() }
-            } label: {
-              Label(isSavingToDevice ? "保存中..." : "存到相册", systemImage: "arrow.down.to.line")
-            }
-            .disabled(isSavingToDevice)
-          }
-
-          if currentItem?.server != nil {
-            Button {
-              Task { await archiveCurrentServerCopy() }
-            } label: {
-              Label("归档", systemImage: "archivebox")
-            }
-          }
-        } label: {
-          Image(systemName: "ellipsis")
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundColor(.primary)
-            .frame(width: 44, height: 44)
-            .background(.ultraThinMaterial)
-            .clipShape(Circle())
-            .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
-        }
-        .accessibilityLabel("更多操作")
+        // 保持对称占位，使日期时间胶囊居中
+        Color.clear
+          .frame(width: 44, height: 44)
       }
       .padding(.horizontal, 16)
       .padding(.top, 4)
@@ -4681,100 +4662,103 @@ struct NativeUnifiedGalleryViewer: View {
         .padding(.bottom, 8)
       }
 
-      // Bottom Bar (对齐原生相册：左圆分享 + 中胶囊操作组 + 右圆删除)
-      HStack(alignment: .center, spacing: 0) {
-        // 左：分享圆形卡片
-        viewerCircleActionButton(
-          title: isPreparingShare ? "准备中" : "分享",
+      // Bottom Bar (所有操作按钮完整展开排布在磨砂胶囊中，均分排布，无“更多”折叠)
+      HStack(spacing: 0) {
+        // 分享
+        viewerBottomActionButton(
           systemName: "square.and.arrow.up",
+          title: isPreparingShare ? "准备中" : "分享",
           disabled: isPreparingShare,
+          showSpinner: isPreparingShare,
           action: { showShareOptionsDialog = true }
         )
 
-        Spacer()
-
-        // 中：胶囊卡片（收藏、详情、加入相册/调节）
-        HStack(spacing: 28) {
-          // 收藏
-          Button(action: toggleFavorite) {
-            Image(systemName: isFavorite ? "heart.fill" : "heart")
-              .font(.system(size: 21, weight: .regular))
-              .foregroundColor(isFavorite ? .red : .primary)
-          }
-          .disabled(isProcessingFavorite || currentItem == nil)
-          .accessibilityLabel(isFavorite ? "已收藏" : "收藏")
-
-          // 详情
-          Button {
-            showInfoSheet = true
-          } label: {
-            Image(systemName: "info.circle")
-              .font(.system(size: 21, weight: .regular))
-              .foregroundColor(.primary)
-          }
-          .accessibilityLabel("详情")
-
-          // 加入相册 / 调节
-          viewerCapsuleActionButton(
-            title: "加入相册",
-            systemName: "slider.horizontal.3",
-            disabled: currentItem == nil,
-            action: { showAlbumTargetDialog = true }
+        // 存到相册 (仅云端存在且本地无时)
+        if currentItem?.server != nil && currentItem?.local == nil {
+          viewerBottomActionButton(
+            systemName: "arrow.down.to.line",
+            title: isSavingToDevice ? "保存中" : "存到相册",
+            disabled: isSavingToDevice,
+            showSpinner: isSavingToDevice,
+            action: { Task { await saveCurrentServerAssetToDevice() } }
           )
         }
-        .padding(.horizontal, 28)
-        .frame(height: 48)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
 
-        Spacer()
+        // 收藏
+        viewerBottomActionButton(
+          systemName: isFavorite ? "heart.fill" : "heart",
+          title: isFavorite ? "已收藏" : "收藏",
+          tintColor: isFavorite ? .red : .primary,
+          disabled: isProcessingFavorite || currentItem == nil,
+          action: toggleFavorite
+        )
 
-        // 右：删除 / 回收站圆形卡片
-        viewerCircleActionButton(
-          title: isRemoteOnly ? "回收站" : "删除",
+        // 详情
+        viewerBottomActionButton(
+          systemName: "info.circle",
+          title: "详情",
+          action: { showInfoSheet = true }
+        )
+
+        // 加入相册
+        viewerBottomActionButton(
+          systemName: "plus.rectangle.on.folder",
+          title: "加入相册",
+          disabled: currentItem == nil,
+          action: { showAlbumTargetDialog = true }
+        )
+
+        // 归档 (仅云端存在时可操作)
+        if currentItem?.server != nil {
+          viewerBottomActionButton(
+            systemName: "archivebox",
+            title: "归档",
+            disabled: isDeletingItem || currentItem?.server == nil,
+            action: { Task { await archiveCurrentServerCopy() } }
+          )
+        }
+
+        // 删除 / 回收站
+        viewerBottomActionButton(
           systemName: "trash",
+          title: isRemoteOnly ? "回收站" : "删除",
           disabled: isDeletingItem || currentItem == nil,
           action: handleDeleteOrTrashTap
         )
       }
-      .padding(.horizontal, 20)
+      .padding(.horizontal, 6)
+      .frame(height: 48)
+      .background(.ultraThinMaterial)
+      .clipShape(Capsule())
+      .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
+      .padding(.horizontal, 16)
       .padding(.bottom, 6)
     }
     .padding(.horizontal, 4)
   }
 
   @ViewBuilder
-  private func viewerCircleActionButton(
-    title: String,
+  private func viewerBottomActionButton(
     systemName: String,
+    title: String,
+    tintColor: Color = .primary,
     disabled: Bool = false,
+    showSpinner: Bool = false,
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Image(systemName: systemName)
-        .font(.system(size: 20, weight: .regular))
-        .foregroundColor(.primary)
-        .frame(width: 48, height: 48)
-        .background(.ultraThinMaterial)
-        .clipShape(Circle())
-        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 2)
-    }
-    .disabled(disabled)
-    .accessibilityLabel(title)
-  }
-
-  @ViewBuilder
-  private func viewerCapsuleActionButton(
-    title: String,
-    systemName: String,
-    disabled: Bool = false,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: systemName)
-        .font(.system(size: 21, weight: .regular))
-        .foregroundColor(.primary)
+      Group {
+        if showSpinner {
+          ProgressView()
+            .scaleEffect(0.8)
+        } else {
+          Image(systemName: systemName)
+            .font(.system(size: 18, weight: .regular))
+            .foregroundColor(tintColor)
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
     }
     .disabled(disabled)
     .accessibilityLabel(title)
@@ -5226,7 +5210,7 @@ private struct NativeSingleAssetPage: View {
   var body: some View {
     GeometryReader { proxy in
       let topPadding: CGFloat = showsControls ? 88 : 0
-      let bottomPadding: CGFloat = showsControls ? 142 : 0
+      let bottomPadding: CGFloat = showsControls ? 120 : 0
       let effectiveHeight = max(100, proxy.size.height - topPadding - bottomPadding)
       let contentSize = CGSize(width: proxy.size.width, height: effectiveHeight)
 

@@ -746,7 +746,13 @@ struct NativeDeviceGrid: View {
         items: assets.map { NativeGridItem(server: nil, local: $0) },
         initialItem: item,
         sourceFrame: viewerSourceFrame,
-        onDismissViewer: { selected = nil }
+        onDismissViewer: {
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) {
+            selected = nil
+          }
+        }
       )
     }
     .navigationTitle(title)
@@ -1305,7 +1311,13 @@ struct NativeResultGrid: View {
         items: merged,
         initialItem: item,
         sourceFrame: viewerSourceFrame,
-        onDismissViewer: { activeViewerItem = nil }
+        onDismissViewer: {
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
+          withTransaction(transaction) {
+            activeViewerItem = nil
+          }
+        }
       )
     }
   }

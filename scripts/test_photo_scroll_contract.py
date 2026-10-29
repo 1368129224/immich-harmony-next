@@ -138,13 +138,12 @@ class PhotoScrollContractTests(unittest.TestCase):
         viewer = source.split("struct NativeUnifiedGalleryViewer", 1)[1]
         # Native iOS viewer top & bottom bar design matching screenshot
         self.assertIn("formatViewerTopDateTitle", viewer)
-        self.assertIn("viewerCircleActionButton", viewer)
-        self.assertIn("viewerCapsuleActionButton", viewer)
+        self.assertIn("viewerBottomActionButton", viewer)
         # Non-fullscreen viewport padding toggles on showsControls
         single_page = source.split("private struct NativeSingleAssetPage", 1)[1]
         self.assertIn("showsControls ? Color(uiColor: .systemBackground) : Color.black", single_page)
         self.assertIn("showsControls ? 88 : 0", single_page)
-        self.assertIn("showsControls ? 142 : 0", single_page)
+        self.assertIn("showsControls ? 120 : 0", single_page)
 
 
 if __name__ == "__main__":

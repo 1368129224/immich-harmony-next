@@ -17,6 +17,13 @@ local.properties
 # Python
 __pycache__/
 *.pyc
+venv/
+.venv/
+.tunnel.env
+certs/
+*.p12
+*.mobileprovision
+
 
 # Operating system files
 .DS_Store
