@@ -36,6 +36,8 @@ class SelectionSourceContractTests(unittest.TestCase):
         self.assertIn("guard !isSelecting else { return }", grid)
         self.assertIn("min(15, max(2,", grid)
         self.assertNotIn(".onLongPressGesture", grid)
+        self.assertIn(".exclusively(before: TapGesture()", grid)
+        self.assertNotIn(".onTapGesture", grid)
         self.assertIn(".onChange(of: latestRequest)", grid)
         self.assertIn("nativeCollectionGridItems", grid)
         self.assertNotIn("nativeFindHeuristicServerMatch", grid)
@@ -49,7 +51,7 @@ class SelectionSwiftBehaviorTests(unittest.TestCase):
     def run_swift(self, helpers, checks):
         with tempfile.TemporaryDirectory(prefix="immich-selection-tests-") as directory:
             source = Path(directory) / "main.swift"
-            source.write_text("import Foundation\n" + helpers + "\n" + checks)
+            source.write_text("import Foundation\nimport CoreGraphics\n" + helpers + "\n" + checks)
             result = subprocess.run([shutil.which("swift"), str(source)], capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -70,7 +72,7 @@ precondition(nativeContinuousSelection(orderedIDs: [], baseline: baseline, start
 precondition(nativeContinuousSelection(orderedIDs: ["z", "m", "a", "x"], baseline: [], startID: "z", endID: "a", selecting: true) == ["z", "m", "a"])
 var frames: [String: CGRect] = [:]
 for (i, id) in order.enumerated() {
-  frames[id] = CGRect(x: (i % 4) * 12, y: (i / 4) * 12, width: 10, height: 10)
+  frames[id] = CGRect(x: CGFloat((i % 4) * 12), y: CGFloat((i / 4) * 12), width: 10, height: 10)
 }
 precondition(nativeSelectionHitID(at: CGPoint(x: 25, y: 13), orderedIDs: order, frames: frames) == "g")
 // Diagonal start b -> g includes c/d/e/f, unlike rectangle intersection.

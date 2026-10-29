@@ -249,9 +249,9 @@ func nativeSelectionHitID(at point: CGPoint, orderedIDs: [String], frames: [Stri
   // Snap gutters/date-header gaps to the closest visible cell. Iteration follows
   // visual order so equal-distance hits are deterministic, unlike Dictionary.first.
   return candidates.min {
-    let lhs = pow($0.1.midX - point.x, 2) + pow($0.1.midY - point.y, 2)
-    let rhs = pow($1.1.midX - point.x, 2) + pow($1.1.midY - point.y, 2)
-    return lhs < rhs
+    let lhsX = $0.1.midX - point.x, lhsY = $0.1.midY - point.y
+    let rhsX = $1.1.midX - point.x, rhsY = $1.1.midY - point.y
+    return lhsX * lhsX + lhsY * lhsY < rhsX * rhsX + rhsY * rhsY
   }?.0
 }
 // MARK: - Gesture direction
@@ -1200,15 +1200,9 @@ struct NativeResultGrid: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                          guard !isMagnifying else { return }
-                          if isSelecting {
-                            toggleSelection(entry.id)
-                          } else {
-                            viewerSourceFrame = geo.frame(in: .global)
-                            activeViewerItem = entry
-                          }
-                        }
+                        .simultaneousGesture(
+                          collectionCellGesture(for: entry, sourceFrame: geo.frame(in: .global))
+                        )
                         .preference(key: NativeItemFramePreferenceKey.self, value: [entry.id: geo.frame(in: .named("resultGridScrollSpace"))])
                       }
                     )
@@ -1252,37 +1246,6 @@ struct NativeResultGrid: View {
                   }
                 }
                 .contentShape(Rectangle())
-                .simultaneousGesture(
-                  LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
-                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("resultGridScrollSpace")))
-                    .updating($selectionPressActive) { _, active, _ in active = true }
-                    .onChanged { phase in
-                      guard !isMagnifying else { return }
-                      switch phase {
-                      case .first(true):
-                        guard !isSelecting else { return }
-                        longPressSelectionActive = true
-                        enterSelection(startingWith: entry.id)
-                      case .second(true, let drag):
-                        // Some OS versions first emit the recognized state here.
-                        if !isSelecting {
-                          longPressSelectionActive = true
-                          enterSelection(startingWith: entry.id)
-                        }
-                        guard longPressSelectionActive, let drag else { return }
-                        if dragSelectionIntent == .undecided {
-                          dragSelectionIntent = nativeDragSelectionIntent(for: drag.translation)
-                        }
-                        guard dragSelectionIntent == .select else { return }
-                        isDragSelecting = true
-                        handle2DDragSelection(at: drag.location)
-                      default: break
-                      }
-                    }
-                    .onEnded { _ in
-                      if longPressSelectionActive { resetSelectionDrag() }
-                    }
-                )
                 .id(entry.id)
               }
             }
@@ -1426,6 +1389,51 @@ struct NativeResultGrid: View {
         }
       )
     }
+  }
+
+  // A recognized long press cannot also execute the cell's tap on release.
+  // The exclusive group remains simultaneous with the ScrollView, so vertical
+  // intent leaves scrolling enabled instead of capturing a high-priority pan.
+  private func collectionCellGesture(for entry: NativeGridItem, sourceFrame: CGRect) -> some Gesture {
+    LongPressGesture(minimumDuration: 0.28, maximumDistance: 15)
+      .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("resultGridScrollSpace")))
+      .updating($selectionPressActive) { _, active, _ in active = true }
+      .onChanged { phase in
+        guard !isMagnifying else { return }
+        switch phase {
+        case .first(true):
+          guard !isSelecting else { return }
+          longPressSelectionActive = true
+          enterSelection(startingWith: entry.id)
+        case .second(true, let drag):
+          if !isSelecting {
+            longPressSelectionActive = true
+            enterSelection(startingWith: entry.id)
+          }
+          guard longPressSelectionActive, let drag else { return }
+          if dragSelectionIntent == .undecided {
+            dragSelectionIntent = nativeDragSelectionIntent(for: drag.translation)
+          }
+          guard dragSelectionIntent == .select else { return }
+          isDragSelecting = true
+          handle2DDragSelection(at: drag.location)
+        default: break
+        }
+      }
+      .onEnded { _ in
+        if longPressSelectionActive { resetSelectionDrag() }
+      }
+      .exclusively(before: TapGesture().onEnded {
+        guard !isMagnifying else { return }
+        if isSelecting {
+          toggleSelection(entry.id)
+        } else {
+          userMovedGrid = true
+          bottomPositionTask?.cancel()
+          viewerSourceFrame = sourceFrame
+          activeViewerItem = entry
+        }
+      })
   }
 
   private func positionAtLatest(proxy: ScrollViewProxy) {
