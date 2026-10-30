@@ -1175,8 +1175,7 @@ struct NativeResultGrid: View {
   private var daySections: [NativeTimelineSection] {
     let days = nativeSortedResultDays(Array(mergedGroups.keys), oldestFirst: startsAtLatest)
     let items = days.flatMap { mergedGroups[$0] ?? [] }
-    guard !items.isEmpty else { return [] }
-    return [NativeTimelineSection(title: nil, date: days.first ?? .distantPast, assets: items)]
+    return nativeContinuousChunks(items, columns: columns)
   }
 
   private var visualOrderedAssetIDs: [String] {
@@ -1188,15 +1187,16 @@ struct NativeResultGrid: View {
   var body: some View {
     ScrollViewReader { scrollProxy in
       ScrollView {
-        LazyVStack(spacing: 4) {
+        LazyVStack(spacing: 1) {
           if startsAtLatest && hasOlder && !assets.isEmpty {
             Button("加载更早照片", action: loadMore)
               .frame(maxWidth: .infinity).padding(16)
           }
+          let chunks = daySections
           let monthMarkers: [String: String] = columns >= 10
-            ? nativeMonthMarkerTitles(for: daySections.first?.assets ?? [], calendar: .autoupdatingCurrent)
+            ? nativeMonthMarkerTitles(for: chunks.flatMap(\.assets), calendar: .autoupdatingCurrent)
             : [:]
-          ForEach(daySections) { section in
+          ForEach(chunks) { section in
           VStack(alignment: .leading, spacing: 2) {
             let gridSpacing: CGFloat = 1
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns), spacing: gridSpacing) {

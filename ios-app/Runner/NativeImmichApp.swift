@@ -1517,6 +1517,7 @@ struct NativePhotosView: View {
   @State private var sourceFilter: NativePhotosSource = .all
   @State private var cachedDayGroups: [NativeDayGroup] = []
   @State private var cachedTimelineSections: [String: [NativeTimelineSection]] = [:]
+  @State private var chunkCache = NativeChunkCache()
   /// assetID -> "YYYY 年 M 月" for the first asset of each month (floating month pill at ≥10 columns).
   @State private var cachedMonthMarkers: [String: String] = [:]
   @State private var launchPreviewItems: [NativeGridItem]?
@@ -1873,11 +1874,14 @@ struct NativePhotosView: View {
   }
 
   private var activeTimelineSections: [NativeTimelineSection] {
-    cachedTimelineSections[selectedTimelineLevel] ?? []
+    let base = cachedTimelineSections[selectedTimelineLevel] ?? []
+    guard selectedTimelineLevel != "年", selectedTimelineLevel != "月", let flat = base.first else { return base }
+    return chunkCache.chunks(for: flat.assets, columns: columns)
   }
 
   private func timelineGridContent(proxy: ScrollViewProxy) -> some View {
-          LazyVStack(spacing: selectedTimelineLevel == "年" || selectedTimelineLevel == "月" ? 0 : 4) {
+          // Continuous levels use 1pt (same as the grid's row spacing) so chunk seams are invisible.
+          LazyVStack(spacing: selectedTimelineLevel == "年" || selectedTimelineLevel == "月" ? 0 : 1) {
             if sourceFilter != .device && model.hasOlder && !model.assets.isEmpty {
               Button {
                 requestOlder()
@@ -3369,10 +3373,50 @@ struct NativePhotosView: View {
 }
 
 struct NativeTimelineSection: Identifiable {
-  var id: Date { date }  // The day stays in place as the display granularity changes.
+  let id: String  // Day sections keep the day identity as the display granularity changes.
   let title: String?
   let date: Date
   let assets: [NativeGridItem]
+
+  init(title: String?, date: Date, assets: [NativeGridItem], id: String? = nil) {
+    self.id = id ?? String(date.timeIntervalSinceReferenceDate)
+    self.title = title
+    self.date = date
+    self.assets = assets
+  }
+}
+
+/// Splits one continuous run of items into lazily-materialized chunks of whole rows.
+/// A single giant LazyVGrid (thousands of cells) re-lays out every cell when the
+/// column count changes or when scrolling to the bottom, which blanks the grid and
+/// makes scrolling stutter. Chunks hold complete rows, so the result looks like one
+/// continuous grid while LazyVStack only materializes the visible chunks.
+func nativeContinuousChunks(_ items: [NativeGridItem], columns: Int, rowsPerChunk: Int = 6) -> [NativeTimelineSection] {
+  guard !items.isEmpty else { return [] }
+  let size = max(1, columns) * max(1, rowsPerChunk)
+  var chunks: [NativeTimelineSection] = []
+  chunks.reserveCapacity(items.count / size + 1)
+  var start = 0
+  while start < items.count {
+    let end = min(items.count, start + size)
+    let slice = Array(items[start..<end])
+    chunks.append(NativeTimelineSection(title: nil, date: slice[0].date, assets: slice, id: slice[0].id))
+    start = end
+  }
+  return chunks
+}
+
+/// Memoizes chunking so scrolling-driven body passes don't re-slice thousands of items.
+final class NativeChunkCache {
+  private var key: (Int, Int, String, String) = (-1, -1, "", "")
+  private var value: [NativeTimelineSection] = []
+  func chunks(for items: [NativeGridItem], columns: Int) -> [NativeTimelineSection] {
+    let k = (columns, items.count, items.first?.id ?? "", items.last?.id ?? "")
+    if k == key { return value }
+    key = k
+    value = nativeContinuousChunks(items, columns: columns)
+    return value
+  }
 }
 
 func nativeTimelineSections(
