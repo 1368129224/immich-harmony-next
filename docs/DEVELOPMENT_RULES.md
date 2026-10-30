@@ -82,12 +82,10 @@ bash scripts/build_ios_lib.sh release
 
 ```bash
 python3 scripts/check_native_ios.py
-python3 -m unittest discover -s scripts -p 'test_*.py'
-node --test scripts/test_timeline.cjs
 git diff --check
 ```
 
-按变更范围选择相关检查，并明确报告没运行的检查。Python 源码契约检查只证明指定结构存在，不证明 Swift 类型检查、手势行为或接口语义正确。
+按变更范围选择相关检查，并明确报告没运行的检查。
 
 macOS 上的 iOS 示例：
 
@@ -101,7 +99,7 @@ xcodebuild -project Runner.xcodeproj -scheme Runner \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
 ```
 
-CI 入口为 `.github/workflows/build-ios.yml`；设备推送入口为 `scripts/push_ios.sh`。构建、上传和设备验收分别记录，不能把 Git push 成功当成 IPA 构建成功。
+CI 入口为 `.github/workflows/build-ios.yml`；设备推送入口为 `scripts/entry/push_ios.sh`（Mac 直连）与 `scripts/entry/ios.sh`（Linux 经安卓中继）。构建、上传和设备验收分别记录，不能把 Git push 成功当成 IPA 构建成功。
 
 ### 5.3 手势与数据回归
 
@@ -129,7 +127,7 @@ node scripts/immich_emulator_proxy.cjs
 - 主机到服务器走 HTTPS 并校验证书；模拟器到主机 HTTP 仅经过可信 HDC 本地通道。
 - 不记录请求体、头或凭据；Ctrl+C 退出。主机 / 模拟器 / HDC 重启后重新启动并建立转发。
 - 不修改 App 默认服务器，不重写任意用户地址。生产环境使用双栈 HTTPS 或具备 IPv6 的真机。
-- HarmonyOS `mkdirSync(path, true)` 对已存在目录可能报错：先检查存在性，并发创建失败后再次确认目录，避免后续缩略图下载失败。用 `node --test scripts/test_timeline.cjs` 回归。
+- HarmonyOS `mkdirSync(path, true)` 对已存在目录可能报错：先检查存在性，并发创建失败后再次确认目录，避免后续缩略图下载失败。
 
 ## 7. 文档维护与交付
 

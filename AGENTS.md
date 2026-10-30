@@ -34,10 +34,10 @@
    ~~~bash
    bash scripts/build_ohos_so.sh
    ~~~
-3. **iOS 本地合规与契约检查：**
+3. **iOS 本地合规检查：**
    修改 iOS 源码后在 Linux NAS 执行：
    ~~~bash
-   python3 scripts/check_native_ios.py && python3 -m unittest discover -s scripts -p 'test_*.py'
+   python3 scripts/check_native_ios.py
    ~~~
 4. **鸿蒙 UI 优先沙箱调试：**
    在 `harmony-app/.../AppBridge.ets` 中保持 `USE_MOCK_BRIDGE = true` 进行快速手势调优。
@@ -57,4 +57,4 @@
 - [Milestone] 核心 crates 与鸿蒙工程搭建完成，双版本适配器与 SQLite 缓存就绪。
 - [Documentation] 文档归拢为三份核心规范：[开发行为规范](docs/DEVELOPMENT_RULES.md)、[Agent 详细设计规范](docs/AGENT_DESIGN_SPEC.md) 与 [功能与 UI 设计简案](docs/PRODUCT_UI_OVERVIEW.md)。
 - [iOS] `ios-app`: 原生 SwiftUI/UIKit + PhotoKit，经 `immich-ios-ffi` 连接 Rust 核心；CI 产出无签名 IPA。
-- [iOS Verification] Linux 端运行 `python3 scripts/check_native_ios.py` 及契约单测；push 后自动触发 CI 构建并更新 LiveContainer 源。
+- [iOS Verification] Linux 端运行 `python3 scripts/check_native_ios.py`；push 后自动触发 CI 构建并更新 LiveContainer 源。

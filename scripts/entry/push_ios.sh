@@ -2,7 +2,7 @@
 # Build, install, and launch the native iOS app on a connected device (macOS).
 set -euo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 DEVICE_NAME="${DEVICE_NAME:-Z iPhone}"

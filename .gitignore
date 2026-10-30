@@ -21,6 +21,7 @@ venv/
 .venv/
 .tunnel.env
 certs/
+cert/
 *.p12
 *.mobileprovision
 

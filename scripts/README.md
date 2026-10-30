@@ -1,218 +1,206 @@
-# Scripts 维护与构建脚本集
+# scripts/
 
-本目录包含了 Immich 原生多端工程（iOS / HarmonyOS）在 Linux NAS 核心开发机、Windows UI 工作站、安卓中继机与 Mac 编译机上的各类自动化工具脚本。
+Immich 原生多端客户端（iOS / HarmonyOS）的构建、检查与真机推送脚本。
+
+**手动调用的最终入口放在 [`entry/`](entry/) 下**；`scripts/` 根目录是被入口、CI 或其他机器调用的底层脚本。
+
+| 机器 | 角色 |
+| :--- | :--- |
+| **Linux NAS** | Rust 核心开发、鸿蒙 `.so` 交叉编译、合规检查、IPA 拉取 / 签名 / 推送 |
+| **Windows PC** | DevEco Studio 鸿蒙开发与模拟器 |
+| **MacBook** | Xcode 构建与真机直装；导出签名证书与描述文件 |
+| **Root 安卓中继** | Termux + proot Ubuntu，运行 `usbmuxd` / `pymobiledevice3`，经 USB 连接 iPhone |
 
 ---
 
 ## 目录速览
 
-| 脚本文件 | 适用平台 | 说明 |
+### 入口（`entry/`）
+
+| 文件 | 平台 | 说明 |
 | :--- | :--- | :--- |
-| **[`push_tunnel.sh`](#1-push_tunnelsh-异网中继推送与唤醒)** | Linux / 任意 POSIX | **【核心】** 通过 Tailscale + Root 安卓中继向 iPhone 静默安装并唤醒应用 |
-| **[`update_livecontainer_ipa.sh`](#2-update_livecontainer_ipash-更新本地-ipa-源)** | Linux NAS | 从 GitHub Actions 自动下载最新构建的未签名 IPA 并刷新本地 LiveContainer 源 |
-| **[`build_ios_lib.sh`](#3-build_ios_libsh-ios-rust-ffi-编译)** | Linux / macOS | 交叉编译 Rust 核心 C-FFI 静态库 (`crates/immich-ios-ffi`) |
-| **[`check_native_ios.py`](#4-check_native_iospy-ios-洁室净室合规检查)** | 跨平台 | 验证 iOS 工程源码与 Bundle 纯净性（严禁 Flutter/Dart 痕迹） |
-| **[`push_ios.sh`](#5-push_iossh-macos-本地有线无线直连推送)** | macOS | 在 Mac 本机通过 Xcode 与 `devicectl` 进行直连编译和安装 |
-| **`build_ohos_so.sh`** | Linux NAS | 交叉编译鸿蒙 ArkTS N-API 动态库 (`immich-ohos-napi`) |
-| **`deploy_harmony.sh`** | Linux NAS | 将编译好的鸿蒙 `.so` 自动同步至 Windows 共享目录 |
+| [`entry/ios.sh`](entry/ios.sh) | Linux NAS | **iOS 远程装机总入口**：`info` / `sign` / `push` / `deploy` / `relay` / `clean`（经安卓中继） |
+| [`entry/push_ios.sh`](entry/push_ios.sh) | macOS | Mac 直连装机：依次执行 Rust 库编译、`xcodebuild`、`check_native_ios.py --app`，再用 `devicectl` 安装并启动 |
+
+### 构建
+
+| 文件 | 平台 | 说明 |
+| :--- | :--- | :--- |
+| [`build_ohos_so.sh`](build_ohos_so.sh) | Linux NAS | 用 `ohrs` 编译 `immich-ohos-napi`（x86_64 模拟器 + arm64 真机），复制到 `harmony-app/entry/libs/`，同步 `index.d.ts` |
+| [`build_ios_lib.sh`](build_ios_lib.sh) | macOS / Linux | 编译 `immich-ios-ffi` 静态库到 `ios-app/Runner/libs/`，同步 C 头文件；Linux 上只编译 host 库用于校验；源码未变时跳过（`FORCE_RUST_BUILD=1` 强制编译） |
+
+### 检查
+
+| 文件 | 说明 |
+| :--- | :--- |
+| [`check_native_ios.py`](check_native_ios.py) | 净室合规检查：git 跟踪文件和 iOS 源码中不得出现 Flutter/Dart 残留；加 `--app <Runner.app>` 时同时检查产物（仅限 macOS）。CI 也会运行 |
+
+### 部署与调试
+
+| 文件 | 平台 | 说明 |
+| :--- | :--- | :--- |
+| [`deploy_harmony.bat`](deploy_harmony.bat) / [`.sh`](deploy_harmony.sh) | Windows（cmd / Git Bash） | 用 Hvigor 打包 HAP，通过 `hdc` 安装并启动；DevEco 路径写死为 `F:\Programs\DevEco Studio` |
+| [`immich_emulator_proxy.cjs`](immich_emulator_proxy.cjs) | Windows | 仅用于调试：为只支持 IPv4 的鸿蒙模拟器转发 `/api/*` 到 IPv6 Immich 服务器（`127.0.0.1:15941`） |
+
+### iOS 发布与远程装机支撑（Linux NAS → 安卓中继 → iPhone）
+
+| 文件 | 运行位置 | 说明 |
+| :--- | :--- | :--- |
+| [`update_livecontainer_ipa.sh`](update_livecontainer_ipa.sh) | Linux NAS | 拉取 GitHub Actions 最新成功构建的未签名 IPA，刷新 LiveContainer 源 |
+| [`push_tunnel.sh`](push_tunnel.sh) | Linux NAS | 底层推送实现，由 `entry/ios.sh push` 调用 |
+| [`start_ios_relay.sh`](start_ios_relay.sh) | 安卓 Termux（`~/start_ios_relay.sh`） | 启动中继：按正确顺序配置 USB 并启动 usbmuxd，由 `entry/ios.sh relay start` 远程触发 |
+| [`.tunnel.env.example`](.tunnel.env.example) | — | 本地配置模板，复制为 `.tunnel.env` 后使用（已 gitignore） |
+| `cert/` | Linux NAS | 存放 `*.p12` 与 `*.mobileprovision`（已 gitignore，**切勿提交**） |
 
 ---
 
-## 1. `push_tunnel.sh` (异网中继推送与唤醒)
-
-专为**免物理 Mac**、利用 **Tailscale 异网穿透 + Root 安卓手机（C-to-C 连接 iPhone）** 的环境设计。直接由本机 Linux 作为中枢大脑，隔空向异地 iPhone 静默安装 IPA 并自动唤醒应用。
-
-### 1.1 工作原理拓扑
-
-```text
-[当前 Linux 开发机] (执行 push_tunnel.sh)
-        │
-        │ 1. 自动连接安卓中继节点 ADB (100.102.83.97:5555)
-        │ 2. 自动巡检并修复 Type-C 为 Host 模式与 USB 调试模式 4
-        │ 3. 极速将待安装 IPA 推送到安卓中继
-        ▼
-[Root 安卓中继机] (调用本地 usbmuxd / pymobiledevice3)
-        │
-        │ 4. 经由物理 C-to-C 数据线直接推入 iPhone
-        ▼
-[目标 iPhone] ───► 自动完成安装并在屏幕上自动拉起应用！
-```
-
-### 1.2 前置配置（仅需一次）
-
-1. **配置中继地址**：
-   复制目录下的配置模板为 `.tunnel.env`（已加入 `.gitignore`，不会提交到仓库）：
-   ```bash
-   cp scripts/.tunnel.env.example scripts/.tunnel.env
-   ```
-   编辑 `scripts/.tunnel.env`，填入安卓手机的 Tailscale IP：
-   ```bash
-   ANDROID_IP="100.102.83.97" # 你的安卓中继机 Tailscale IP
-   ```
-
-2. **安卓端确保环境就绪**：
-   安卓 Termux（Ubuntu 容器内）确保已插好 iPhone 并开启网络 ADB（5555 端口）。
-
-### 1.3 标准日常开发流程（推荐）
-
-每次在 Linux 上完成编码并 `git push`、GitHub Actions 编译成功后：
+## 1. 必跑验证（参见 [AGENTS.md](../AGENTS.md)）
 
 ```bash
-# 第一步：下载最新构建产物（落盘至 /mnt/ssd/temp/ipa/Immich-unsigned.ipa 并更新本地源）
-bash scripts/update_livecontainer_ipa.sh
+# 修改 crates/ 后
+~/.cargo/bin/cargo test --workspace
+bash scripts/build_ohos_so.sh
 
-# 第二步：手动执行中继推送，iPhone 自动安装并拉起应用
-./scripts/push_tunnel.sh
-```
-
-### 1.4 命令参数与高级用法
-
-```bash
-# 1. 连通性测试模式（仅测试中继隧道和 iPhone 识别状态，不执行安装）
-./scripts/push_tunnel.sh --info
-
-# 2. 懒人一键流：自动执行 update_livecontainer_ipa.sh 抓取最新构建，紧接着推包
-./scripts/push_tunnel.sh -u
-
-# 3. 指定推送到其他自定义的 IPA 文件
-./scripts/push_tunnel.sh /path/to/custom_app.ipa
-
-# 4. 临时指定不同的中继 IP 与端口（覆盖配置文件）
-./scripts/push_tunnel.sh -s 100.102.83.97:5555
-
-# 5. 安装完成后不自动拉起应用
-./scripts/push_tunnel.sh --no-launch
-
-# 6. 查看完整帮助说明
-./scripts/push_tunnel.sh -h
-```
-
-### 1.5 核心技术踩坑与自动修复原理（重要）
-
-当你用 C-to-C 线连接安卓手机与 iPhone 时，通常会遇到以下三个底层坑点，`push_tunnel.sh` 脚本已将它们**全自动修复**：
-
-1. **坑点一：安卓 Type-C 角色协商成了从机（Device/Sink）**
-   - **现象**：执行 `ls -l /dev/bus/usb/*/` 为空，安卓以为自己连了充电宝或电脑，USB Host 控制器未启动。
-   - **修复命令**：
-     ```bash
-     adb -s 100.102.83.97:5555 shell "su -c 'echo host > /sys/class/typec/port0/data_role'"
-     ```
-   - 切换为 `host` 后，iPhone 才会正式枚举挂载到安卓的 `/dev/bus/usb/001/` 总线上。
-
-2. **坑点二：iPhone USB 接口配置未切到模式 4（MUX 调试通信）**
-   - **现象**：`usbmuxd` 报错 `Could not set configuration 4: LIBUSB_ERROR_BUSY`。
-   - **修复命令**：
-     ```bash
-     adb -s 100.102.83.97:5555 shell "su -c 'echo 4 > /sys/bus/usb/devices/1-*/bConfigurationValue'"
-     ```
-
-3. **坑点三：设备热插拔后的权限与服务状态**
-   - 每次重新插拔或切换角色后，必须确保 USB 权限开放并重启 `usbmuxd`：
-     ```bash
-     adb -s 100.102.83.97:5555 shell "su -c 'chmod -R 777 /dev/bus/usb'"
-     ```
-
----
-
-### 1.6 远程 ADB 常用管理命令速查
-
-中继安卓机已通过 Tailscale 开放远程 ADB（IP: `100.102.83.97:5555`），在 Linux 本机可直接执行以下管理命令：
-
-```bash
-# 1. 连接与状态检查
-adb connect 100.102.83.97:5555
-adb devices
-
-# 2. 检查安卓上识别到的 USB 设备列表（查看 iPhone 是否在位）
-adb -s 100.102.83.97:5555 shell "su -c 'ls -l /dev/bus/usb/*/'"
-
-# 3. 查看安卓当前 Type-C 角色（期望输出包含 [host]）
-adb -s 100.102.83.97:5555 shell "su -c 'cat /sys/class/typec/port0/data_role'"
-
-# 4. 在安卓容器内直接执行 pymobiledevice3 查看 iPhone 信息
-adb -s 100.102.83.97:5555 shell "su -c 'PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- pymobiledevice3 lockdown info'"
-
-# 5. 查看安卓手机电池与供电情况（防止安卓反向给 iPhone 充爆电）
-adb -s 100.102.83.97:5555 shell dumpsys battery
-
-# 6. 进入安卓 Root 交互终端
-adb -s 100.102.83.97:5555 shell
-```
-
----
-
-### 1.7 关于 iOS 签名与安装途径
-
-iOS 原生要求直接安装到系统桌面的应用必须具备有效签名。针对无付费开发者账号的环境，推荐以下三种成熟方案：
-
-* **方案 A：LiveContainer 免签名即装即用（强烈推荐，日常开发首选）**
-  - **特点**：**100% 免签名、永久有效、不占 3 个免费 App 名额**。
-  - **用法**：执行 `bash scripts/update_livecontainer_ipa.sh` 后，手机打开 LiveContainer 即可无感更新使用最新的未签名 IPA。
-* **方案 B：手机端 SideStore 自动本地签名**
-  - **特点**：手机本地自闭环重签，直接安装到 iOS 桌面。
-  - **用法**：在 iPhone 打开 SideStore，添加 NAS 托管的 `Immich-unsigned.ipa` 下载链接即可自动签名并安装到桌面。
-* **方案 C：使用已有证书配合 `zsign` 本地秒级自签**
-  - **特点**：完全在 Linux NAS 端完成签名，随后由 `push_tunnel.sh` 秒推真机并唤醒。
-  - **命令**：
-    ```bash
-    zsign -k cert.p12 -p '证书密码' -m profile.mobileprovision \
-          -o /mnt/ssd/temp/ipa/Immich-signed.ipa \
-          /mnt/ssd/temp/ipa/Immich-unsigned.ipa
-    ./scripts/push_tunnel.sh /mnt/ssd/temp/ipa/Immich-signed.ipa
-    ```
-
----
-
-## 2. `update_livecontainer_ipa.sh` (更新本地 IPA 源)
-
-用于从 GitHub Actions CI 或 Release 抓取最新成功的未签名 iOS 构建，并无缝集成到本地 LiveContainer IPA 软件源。
-
-```bash
-# 抓取当前分支（默认 main）的最新成功构件并刷新 LiveContainer 源
-bash scripts/update_livecontainer_ipa.sh
-
-# 抓取指定分支
-bash scripts/update_livecontainer_ipa.sh feat/new-timeline
-```
-* **产物路径**：
-  - `/mnt/ssd/temp/ipa/Immich-unsigned.ipa`
-  - `/mnt/ssd/temp/ipa/ImmichZ-unsigned.ipa`（旧名兼容软链/拷贝）
-* **关联更新**：自动调用 `/home/zooter/docker-config/livecontainer-ipa-source/update-source.py` 生成 `source.json`。
-
----
-
-## 3. `build_ios_lib.sh` (iOS Rust FFI 编译)
-
-为 iOS 编译底层 Rust 核心静态库 (`crates/immich-ios-ffi`)，并自动生成/同步 C-FFI 头文件 `immich_core_ffi.h` 到 Xcode 原生工程目录。
-
-```bash
-# 编译 Debug 库
-bash scripts/build_ios_lib.sh debug
-
-# 编译 Release 优化库
-bash scripts/build_ios_lib.sh release
-```
-* **输出目标**：`ios-app/Runner/libs/` 下对应的平台静态归档文件。
-
----
-
-## 4. `check_native_ios.py` (iOS 洁室净室合规检查)
-
-严格执行开源许可与独立洁室实现规范，全自动化扫描源码树与产物包，严防任何 Flutter / Dart 或非原生组件残留。
-
-```bash
-# 执行静态合规检查与回归单元测试
+# 修改 iOS 源码后
 python3 scripts/check_native_ios.py
-python3 -m unittest discover -s scripts -p 'test_*.py'
+
+# git push 且 CI 成功后
+bash scripts/update_livecontainer_ipa.sh
 ```
 
 ---
 
-## 5. `push_ios.sh` (macOS 本地直连推送)
-
-在带有物理 Xcode 的 MacBook 上使用，支持有线或官方 Wi-Fi 局域网配对模式下直接编译、部署和断点启动：
+## 2. `update_livecontainer_ipa.sh`
 
 ```bash
-# 指定设备名称或 UDID（支持环境变量自定义）
-DEVICE_NAME="Z iPhone" bash scripts/push_ios.sh
+bash scripts/update_livecontainer_ipa.sh             # 当前 git 分支（取不到时用 main）
+bash scripts/update_livecontainer_ipa.sh feat/xxx    # 指定分支
 ```
+
+- 依赖 `gh`（已登录）和 `python3`。
+- 选取 `build-ios.yml` 在该分支上最新一次成功的运行，下载 artifact `immich-ios-ipa-unsigned`；下载失败时（例如 artifact 配额用尽）改从 Release `latest-build` 断点续传。
+- 校验 IPA 结构后原子替换：
+  - `/mnt/ssd/temp/ipa/Immich-unsigned.ipa`
+  - `/mnt/ssd/temp/ipa/ImmichZ-unsigned.ipa`（旧文件名，App 内自更新仍在使用，**不要删除**）
+- 最后调用 `update-source.py` 重新生成 `source.json`。
+- 可用环境变量覆盖：`REPO`、`WORKFLOW`、`ARTIFACT`、`IPA_NAME`、`IPA_DIR`、`UPDATER`。
+
+---
+
+## 3. `entry/ios.sh`（Linux NAS 全流程入口）
+
+```bash
+./scripts/entry/ios.sh info              # 证书 / 描述文件 / IPA / 中继 / iPhone 状态
+./scripts/entry/ios.sh sign              # Immich-unsigned.ipa → Immich-signed.ipa（zsign）
+./scripts/entry/ios.sh push [ipa]        # 推送到 iPhone 并启动（默认 Immich-signed.ipa）
+./scripts/entry/ios.sh deploy            # sign + push ⭐
+./scripts/entry/ios.sh relay status|start|stop
+./scripts/entry/ios.sh clean             # 清理 IPA 目录下的 .download.* 临时目录
+```
+
+**典型流程**：CI 成功 → `update_livecontainer_ipa.sh` → `entry/ios.sh deploy`。
+
+### 3.1 配置
+
+```bash
+cp scripts/.tunnel.env.example scripts/.tunnel.env   # 然后编辑
+```
+
+| 变量 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `ANDROID_IP` / `ADB_PORT` | `100.102.83.97` / `5555` | 安卓中继的 Tailscale 地址与网络 ADB 端口 |
+| `BUNDLE_ID` | `com.immichz.immichz` | 安装后要启动的 App |
+| `IPA_DIR` | `/mnt/ssd/temp/ipa` | IPA 目录 |
+| `IPA_UNSIGNED` / `IPA_SIGNED` | `$IPA_DIR/Immich-{unsigned,signed}.ipa` | 签名的输入 / 输出路径 |
+| `P12_PASSWORD` | **无，必填** | `cert/*.p12` 的导出密码 |
+
+### 3.2 依赖
+
+- `adb`、`openssl`（3.x 版本下脚本会自动加 `-legacy`，用于读取 macOS 导出的 RC2 加密 p12）、`python3`、`unzip`
+- `zsign`：
+
+  ```bash
+  git clone --depth 1 https://github.com/zhlynn/zsign.git /tmp/zsign
+  cd /tmp/zsign/build/linux && make -j"$(nproc)"
+  mkdir -p ~/.local/bin && cp ../../bin/zsign ~/.local/bin/
+  ```
+
+### 3.3 证书与描述文件
+
+`cert/` 下需要放置一个 `*.p12` 和一个 `*.mobileprovision`，两者都从 Mac 导出（见第 6 节）。
+
+| 概念 | 有效期 | 说明 |
+| :--- | :--- | :--- |
+| 签名证书（p12） | 1 年 | 到期前在 Xcode 中重新生成 |
+| 描述文件（免费账号） | **7 天** | 过期后 App 无法启动，需要在 Mac 上续期、重新签名并推送 |
+
+---
+
+## 4. `push_tunnel.sh`（底层推送）
+
+一般通过 `entry/ios.sh push` / `deploy` 调用即可。直接调用：
+
+```bash
+./scripts/push_tunnel.sh --info                   # 只诊断中继与 iPhone
+./scripts/push_tunnel.sh /path/to/signed.ipa      # 推送指定 IPA
+./scripts/push_tunnel.sh --no-launch <ipa>        # 安装后不启动
+./scripts/push_tunnel.sh -s 100.x.y.z:5555 <ipa>  # 指定中继地址
+```
+
+> ⚠️ 不传路径时默认推送 `IPA_PATH`（未配置时是 `Immich-unsigned.ipa`），`-u` 也只会拉取**未签名**包。真机只能安装已签名的 IPA，所以请传入签名后的路径，或直接用 `entry/ios.sh deploy`。
+
+**流程**：`adb connect` → Type-C 切 host → Apple 设备（`idVendor=05ac`）切到 USB 配置 4 → 必要时重启 usbmuxd → `pymobiledevice3 lockdown info` 握手（失败自动重试一次）→ `adb push` 到中继并拷入 proot → `pymobiledevice3 apps install` → `apps launch`。
+
+---
+
+## 5. 安卓中继：`start_ios_relay.sh`
+
+### 5.1 部署（一次性）
+
+```bash
+adb -s <relay> push scripts/start_ios_relay.sh /data/local/tmp/
+adb -s <relay> shell "su -c 'cp /data/local/tmp/start_ios_relay.sh /data/data/com.termux/files/home/'"
+```
+
+### 5.2 启动
+
+```bash
+bash ~/start_ios_relay.sh            # 在 Termux 中运行
+./scripts/entry/ios.sh relay start   # 或在 NAS 上远程触发
+```
+
+执行步骤：获取唤醒锁 → 固定 HostID 与 SystemBUID（避免 iPhone 反复要求信任）→ 停止旧的 usbmuxd → Type-C 切 host → USB 切到配置 4，并**轮询直到接口 `4.0` 出现** → **之后才启动 usbmuxd** → 确认 usbmuxd 识别到设备 → 用 `lockdown info` 做最终验证。
+
+> ⚠️ **启动顺序很重要**：如果在 USB 配置稳定之前启动 usbmuxd，它的内部设备表会失效，`ListDevices` 将返回空列表。
+
+日志：`/data/local/tmp/usbmuxd.log`。
+
+---
+
+## 6. Mac 端证书工具（不在本仓库）
+
+Mac 上的 `~/zzc-data/ios_cert_tool.sh` 负责检查和导出证书，并上传到 NAS 的 `scripts/cert/`：
+
+```bash
+bash ios_cert_tool.sh check    # 证书 / 描述文件有效期、绑定设备
+bash ios_cert_tool.sh export   # 引导导出 p12（必须在 Mac 桌面的「终端」中运行）
+bash ios_cert_tool.sh sync     # check + upload ⭐
+bash ios_cert_tool.sh backup
+```
+
+- 导出带私钥的 p12 需要在图形界面中授权，通过 SSH 运行会报 `User interaction is not allowed`。
+- **续期描述文件**：Xcode → Signing & Capabilities → 取消勾选并重新勾选 *Automatically manage signing*。如果没有生效，删除 `~/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision` 后重试。
+- 续期后的完整流程：Mac 上运行 `ios_cert_tool.sh sync` → NAS 上运行 `./scripts/entry/ios.sh deploy`。
+
+---
+
+## 7. 故障排查
+
+| 现象 | 处理 |
+| :--- | :--- |
+| `zsign: command not found` | 按 3.2 节安装到 `~/.local/bin` |
+| `未设置 P12_PASSWORD` / p12 无法解开 | 在 `.tunnel.env` 中设置正确的 `P12_PASSWORD` |
+| 安卓中继不可达 | 检查安卓端的 Tailscale 连接和网络 ADB（5555）授权 |
+| iPhone 未识别 / `DeviceList` 为空 | `entry/ios.sh relay status`；检查 C-to-C 线和「信任此电脑」；运行 `entry/ios.sh relay start` 按正确顺序重启 |
+| iPhone 反复弹出「信任此电脑」 | 信任判断同时看 HostID 与 SystemBUID，两者由 `start_ios_relay.sh` 固定在 proot 内的 `/var/lib/lockdown/SystemConfiguration.plist`；确认安卓上部署的是最新版脚本，再运行 `entry/ios.sh relay start` |
+| 安装成功但 App 闪退 | 描述文件已过期（7 天），续期后重新 `deploy` |

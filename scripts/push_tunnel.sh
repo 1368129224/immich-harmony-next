@@ -136,7 +136,7 @@ ROLES="$(adb -s "$ADB_TARGET" shell "su -c 'cat /sys/class/typec/port0/data_role
 
 if echo "$ROLES" | grep -q "\[device\]"; then
   echo "⚠️  检测到安卓处于 [device] (从机) 模式，正在自动切换为 [host] (主机) 模式..."
-  adb -s "$ADB_TARGET" shell "su -c 'echo host > /sys/class/typec/port0/data_role 2>/dev/null || true'"
+  adb -s "$ADB_TARGET" shell "su -c 'echo source > /sys/class/typec/port0/power_role 2>/dev/null; sleep 1; echo host > /sys/class/typec/port0/data_role 2>/dev/null || true'"
   sleep 1
 fi
 
