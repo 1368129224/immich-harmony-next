@@ -42,6 +42,7 @@ final class NativeSyncCacheStore: @unchecked Sendable {
     guard key != accountKey else { return }
     saveQueue.sync {} // Drain snapshots queued before changing account.
     accountKey = key
+    ImmichCoreBridge.shared.setActiveAccount(key)
     fileURL = key.map { key in
       let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
       return folder.appendingPathComponent("native_cloud_sync_cache_\(digest).json")

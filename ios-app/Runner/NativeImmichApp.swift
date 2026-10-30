@@ -36,13 +36,23 @@ struct NativeServerConfig: Codable, Identifiable, Equatable {
   var credential: String? { accessToken ?? apiKey }
 }
 
-enum NativeSessionStore {
+/// Secret storage for session tokens / API keys. Keychain first; if the Keychain is
+/// unavailable (unsigned sideloads) falls back to a file in Application Support that is
+/// excluded from backups and uses complete file protection. Secrets are never written to
+/// UserDefaults.
+enum NativeSecretStore {
   private static let service = "com.immichz.session"
-  private static let account = "immich.server_config"
-  private static let fallbackKey = "immichz.session.fallback"
-  private static let allAccountsKey = "immichz.saved_accounts_list"
 
-  static func read() -> NativeServerConfig? {
+  private static var fallbackDirectory: URL {
+    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    return base.appendingPathComponent("immichz-secure", isDirectory: true)
+  }
+
+  private static func fallbackURL(_ account: String) -> URL {
+    fallbackDirectory.appendingPathComponent(account.replacingOccurrences(of: "/", with: "_") + ".bin")
+  }
+
+  static func read(account: String) -> Data? {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -51,55 +61,97 @@ enum NativeSessionStore {
       kSecMatchLimit as String: kSecMatchLimitOne,
     ]
     var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecSuccess, let data = result as? Data,
-       let config = try? JSONDecoder().decode(NativeServerConfig.self, from: data) {
-      return config
+    if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data {
+      return data
     }
-
-    // Unsigned installations may not have Keychain access.
-    if let raw = UserDefaults.standard.string(forKey: fallbackKey),
-       let data = raw.data(using: .utf8),
-       let config = try? JSONDecoder().decode(NativeServerConfig.self, from: data) {
-      return config
-    }
-    return nil
+    return try? Data(contentsOf: fallbackURL(account))
   }
 
-  static func save(_ config: NativeServerConfig) throws {
-    let data = try JSONEncoder().encode(config)
+  static func write(_ data: Data, account: String) {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
     ]
-    let attributes: [String: Any] = [kSecValueData as String: data]
-    let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-    let writeStatus: OSStatus
+    let attributes: [String: Any] = [
+      kSecValueData as String: data,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+    ]
+    var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     if status == errSecItemNotFound {
-      var insert = query
-      insert[kSecValueData as String] = data
-      writeStatus = SecItemAdd(insert as CFDictionary, nil)
-    } else {
-      writeStatus = status
+      status = SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)
     }
-    if writeStatus == errSecSuccess {
-      UserDefaults.standard.removeObject(forKey: fallbackKey)
-    } else {
-      UserDefaults.standard.set(String(data: data, encoding: .utf8), forKey: fallbackKey)
+    if status == errSecSuccess {
+      try? FileManager.default.removeItem(at: fallbackURL(account))
+      return
     }
+    // Keychain unavailable: protected, non-backed-up file.
+    var dir = fallbackDirectory
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? dir.setResourceValues(values)
+    try? data.write(to: fallbackURL(account), options: [.atomic, .completeFileProtection])
+  }
 
+  static func delete(account: String) {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: account,
+    ]
+    SecItemDelete(query as CFDictionary)
+    try? FileManager.default.removeItem(at: fallbackURL(account))
+  }
+}
+
+enum NativeSessionStore {
+  private static let account = "immich.server_config"
+  private static let accountsAccount = "immich.saved_accounts"
+  // Legacy plaintext locations, only read to migrate then purge.
+  private static let legacyFallbackKey = "immichz.session.fallback"
+  private static let legacyAllAccountsKey = "immichz.saved_accounts_list"
+
+  /// Moves secrets that older builds left in UserDefaults into secure storage and deletes them.
+  private static func migrateLegacyPlaintext() {
+    let defaults = UserDefaults.standard
+    if let raw = defaults.string(forKey: legacyFallbackKey), let data = raw.data(using: .utf8) {
+      if NativeSecretStore.read(account: account) == nil { NativeSecretStore.write(data, account: account) }
+      defaults.removeObject(forKey: legacyFallbackKey)
+    }
+    if let data = defaults.data(forKey: legacyAllAccountsKey) {
+      if NativeSecretStore.read(account: accountsAccount) == nil { NativeSecretStore.write(data, account: accountsAccount) }
+      defaults.removeObject(forKey: legacyAllAccountsKey)
+    }
+  }
+
+  static func read() -> NativeServerConfig? {
+    migrateLegacyPlaintext()
+    guard let data = NativeSecretStore.read(account: account) else { return nil }
+    return try? JSONDecoder().decode(NativeServerConfig.self, from: data)
+  }
+
+  static func save(_ config: NativeServerConfig) throws {
+    let data = try JSONEncoder().encode(config)
+    NativeSecretStore.write(data, account: account)
     // Also persist into saved accounts list
     saveToHistory(config)
   }
 
   static func savedAccounts() -> [NativeServerConfig] {
-    guard let data = UserDefaults.standard.data(forKey: allAccountsKey),
+    migrateLegacyPlaintext()
+    guard let data = NativeSecretStore.read(account: accountsAccount),
           let list = try? JSONDecoder().decode([NativeServerConfig].self, from: data) else {
       if let current = read() { return [current] }
       return []
     }
     return list
+  }
+
+  private static func writeAccounts(_ list: [NativeServerConfig]) {
+    if let data = try? JSONEncoder().encode(list) {
+      NativeSecretStore.write(data, account: accountsAccount)
+    }
   }
 
   static func saveToHistory(_ config: NativeServerConfig) {
@@ -109,17 +161,13 @@ enum NativeSessionStore {
     } else {
       list.append(config)
     }
-    if let data = try? JSONEncoder().encode(list) {
-      UserDefaults.standard.set(data, forKey: allAccountsKey)
-    }
+    writeAccounts(list)
   }
 
   static func removeAccount(id: String) {
     var list = savedAccounts()
     list.removeAll { $0.id == id }
-    if let data = try? JSONEncoder().encode(list) {
-      UserDefaults.standard.set(data, forKey: allAccountsKey)
-    }
+    writeAccounts(list)
     if let current = read(), current.id == id {
       clear()
     }
@@ -673,11 +721,9 @@ final class NativeImmichClient {
 
   func restoreTrash(ids: [String]) async throws {
     guard !ids.isEmpty else { return }
-    do {
-      _ = try await send(path: "trash/restore", method: "POST", body: ["ids": ids])
-    } catch {
-      _ = try await send(path: "trash/restore/assets", method: "POST", body: ["ids": ids])
-    }
+    // `trash/restore` restores the ENTIRE trash and ignores ids, so it must never be
+    // used (not even as a fallback) for selective restore.
+    _ = try await send(path: "trash/restore/assets", method: "POST", body: ["ids": ids])
   }
 
   func emptyTrash() async throws {
@@ -958,7 +1004,7 @@ struct NativeImmichRootView: View {
     .task {
       // Initialize cross-platform Rust core engine
       _ = try? await ImmichCoreBridge.shared.initializeCoreEngine()
-      if let saved = config, let key = saved.apiKey ?? saved.accessToken {
+      if let saved = config, let key = saved.apiKey {
         _ = try? await ImmichCoreBridge.shared.loginServer(serverUrl: saved.serverUrl, apiKey: key)
       }
       guard let saved = config, saved.credential != nil else { return }
@@ -988,13 +1034,8 @@ struct NativeImmichRootView: View {
 
 private extension NativeSessionStore {
   static func clear() {
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service,
-      kSecAttrAccount as String: account,
-    ]
-    SecItemDelete(query as CFDictionary)
-    UserDefaults.standard.removeObject(forKey: fallbackKey)
+    NativeSecretStore.delete(account: account)
+    UserDefaults.standard.removeObject(forKey: legacyFallbackKey)
   }
 }
 
@@ -1146,7 +1187,7 @@ private struct NativeLoginView: View {
       try NativeSessionStore.save(value)
       NativeSyncCacheStore.shared.configure(server: value.serverUrl, userId: value.userId)
       NativeBackgroundDiagnostics.shared.configureForCurrentAccount()
-      if let key = value.apiKey ?? value.accessToken {
+      if let key = value.apiKey {
         _ = try? await ImmichCoreBridge.shared.initializeCoreEngine()
         _ = try? await ImmichCoreBridge.shared.loginServer(serverUrl: value.serverUrl, apiKey: key)
       }
@@ -1586,9 +1627,6 @@ struct NativePhotosView: View {
     var seenServer = Set<String>()
     var result = [NativeGridItem]()
 
-    let unmatchedServers = model.assets.filter { serverToLocal[$0.id] == nil }
-    let serverBySec = nativeIndexAssetsBySecond(unmatchedServers)
-
     for local in device.assets where localExclusionsReady {
       let item: NativeGridItem
       if let serverID = matched[local.id] {
@@ -1603,13 +1641,12 @@ struct NativePhotosView: View {
         seenServer.insert(serverID)
         if excludedServerAssetIDs.contains(serverID) { continue }
         if sourceFilter == .server && archivedServerIDs.contains(serverID) { continue }
-      } else if let heuristicServer = nativeFindHeuristicServerMatch(local: local, serverBySecond: serverBySec, usedServerIDs: seenServer) {
-        guard serverExclusionsReady else { continue }
-        item = NativeGridItem(server: heuristicServer, local: local)
-        seenServer.insert(heuristicServer.id)
-        if excludedServerAssetIDs.contains(heuristicServer.id) { continue }
-        if sourceFilter == .server && archivedServerIDs.contains(heuristicServer.id) { continue }
-      } else { item = NativeGridItem(server: nil, local: local) }
+      } else {
+        // Only checksum-verified pairs are merged (spec §3.1). Timestamp-based
+        // guesses could pair unrelated assets and make "delete all" remove the
+        // wrong cloud item, so unverified assets stay separate.
+        item = NativeGridItem(server: nil, local: local)
+      }
       if nativePhotosSourceIncludes(sourceFilter, hasLocal: item.local != nil, hasServer: item.server != nil, hasVerifiedMatch: matched[local.id] != nil || item.server != nil),
          !excludedLocalIDs.contains(local.id) {
         result.append(item)
@@ -2573,7 +2610,7 @@ struct NativePhotosView: View {
           }
           Button("取消", role: .cancel) {}
         } message: {
-          Text("将从云端服务器及本地设备相册中彻底删除所选照片。")
+          Text("将从本地设备相册删除，并将云端照片移入云端回收站（是否可恢复取决于服务器设置）。")
         }
         .alert("保存到本机照片", isPresented: $showSaveConfirmation) {
           Button("取消", role: .cancel) {}
@@ -4479,7 +4516,7 @@ struct NativeUnifiedGalleryViewer: View {
       Button("仅删除本地照片", role: .destructive) {
         performDeleteItem(scope: .localOnly)
       }
-      Button("全部删除（本地和云端彻底删除）", role: .destructive) {
+      Button("全部删除（本地与云端）", role: .destructive) {
         performDeleteItem(scope: .all)
       }
       Button("取消", role: .cancel) {}
@@ -4891,16 +4928,18 @@ struct NativeUnifiedGalleryViewer: View {
           throw NativeShareError.originalUnavailable
         }
 
-        if removeGPS {
-          fileURL = (try? nativeStripGPSFromImageFile(at: fileURL)) ?? fileURL
-        }
+        fileURL = try nativeShareFile(fileURL, removeGPS: removeGPS)
 
         preparedURL = fileURL
         guard !Task.isCancelled, sharePreparationID == preparationID else { return }
         shareItem = fileURL
       } catch {
         guard !Task.isCancelled, sharePreparationID == preparationID else { return }
-        viewerMessage = "原件暂不可分享。请检查网络、照片权限或 iCloud 原件状态后重试。\n\(error.localizedDescription)"
+        if let shareError = error as? NativeShareError, shareError != .originalUnavailable {
+          viewerMessage = shareError.localizedDescription
+        } else {
+          viewerMessage = "原件暂不可分享。请检查网络、照片权限或 iCloud 原件状态后重试。\n\(error.localizedDescription)"
+        }
       }
     }
   }
@@ -4962,9 +5001,17 @@ struct NativeUnifiedGalleryViewer: View {
   }
 }
 
-private enum NativeShareError: LocalizedError {
+enum NativeShareError: LocalizedError {
   case originalUnavailable
-  var errorDescription: String? { "无法读取原件。" }
+  case gpsStripUnsupported
+  case gpsStripFailed
+  var errorDescription: String? {
+    switch self {
+    case .originalUnavailable: return "无法读取原件。"
+    case .gpsStripUnsupported: return "该文件格式暂不支持去除位置信息，已取消分享。可在设置中开启“分享时保留位置信息”后重试。"
+    case .gpsStripFailed: return "去除位置信息失败，已取消分享以避免泄露定位。"
+    }
+  }
 }
 
 @MainActor
@@ -5036,12 +5083,12 @@ enum NativeShareFormatMode {
 
 func nativeCompatibleCopy(for sourceURL: URL, removeGPS: Bool) throws -> URL {
   guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
-    return sourceURL
+    throw NativeShareError.gpsStripUnsupported
   }
   let destinationURL = FileManager.default.temporaryDirectory
     .appendingPathComponent("\(UUID().uuidString)_compat.\(removeGPS ? "nogps.jpg" : "jpg")")
   guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, "public.jpeg" as CFString, 1, nil) else {
-    return sourceURL
+    throw NativeShareError.gpsStripFailed
   }
   let count = CGImageSourceGetCount(source)
   if count > 0 {
@@ -5059,58 +5106,67 @@ func nativeCompatibleCopy(for sourceURL: URL, removeGPS: Bool) throws -> URL {
     return destinationURL
   } else {
     try? FileManager.default.removeItem(at: destinationURL)
-    return sourceURL
+    throw NativeShareError.gpsStripFailed
   }
 }
 
 func nativeStripGPSFromImageFile(at sourceURL: URL) throws -> URL {
-  guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
-    return sourceURL
-  }
-  guard let uti = CGImageSourceGetType(source) else {
-    return sourceURL
+  // Never fall back to the unsanitized source: callers asked for a GPS-free copy,
+  // so every failure path throws and the share is blocked.
+  guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+        let uti = CGImageSourceGetType(source),
+        CGImageSourceGetCount(source) > 0 else {
+    throw NativeShareError.gpsStripUnsupported
   }
 
   let ext = sourceURL.pathExtension
-  let sanitizedFilename = "\(UUID().uuidString)_nogps.\(ext)"
+  let sanitizedFilename = ext.isEmpty ? "\(UUID().uuidString)_nogps" : "\(UUID().uuidString)_nogps.\(ext)"
   let destinationURL = FileManager.default.temporaryDirectory.appendingPathComponent(sanitizedFilename)
 
   guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, uti, 1, nil) else {
-    return sourceURL
+    throw NativeShareError.gpsStripFailed
   }
 
-  // Read metadata dict
-  let count = CGImageSourceGetCount(source)
-  if count > 0 {
-    if let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-      var sanitized = metadata
-      // Remove GPS Dictionary
-      sanitized.removeValue(forKey: kCGImagePropertyGPSDictionary)
-      CGImageDestinationAddImageFromSource(destination, source, 0, sanitized as CFDictionary)
-    } else {
-      CGImageDestinationAddImageFromSource(destination, source, 0, nil)
-    }
-  }
+  var sanitized = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]) ?? [:]
+  sanitized.removeValue(forKey: kCGImagePropertyGPSDictionary)
+  CGImageDestinationAddImageFromSource(destination, source, 0, sanitized as CFDictionary)
 
-  if CGImageDestinationFinalize(destination) {
-    return destinationURL
-  } else {
+  guard CGImageDestinationFinalize(destination) else {
     try? FileManager.default.removeItem(at: destinationURL)
-    return sourceURL
+    throw NativeShareError.gpsStripFailed
   }
+
+  // Verify the output really has no GPS block before it can be shared.
+  guard let check = CGImageSourceCreateWithURL(destinationURL as CFURL, nil),
+        let props = CGImageSourceCopyPropertiesAtIndex(check, 0, nil) as? [CFString: Any],
+        props[kCGImagePropertyGPSDictionary] == nil else {
+    try? FileManager.default.removeItem(at: destinationURL)
+    throw NativeShareError.gpsStripFailed
+  }
+  return destinationURL
+}
+
+/// Returns a share-ready file honoring the user's GPS preference. When removal is
+/// requested and cannot be done reliably (failure, video, unsupported format) this
+/// throws instead of silently sharing the original with location data.
+func nativeShareFile(_ url: URL, removeGPS: Bool) throws -> URL {
+  guard removeGPS else { return url }
+  return try nativeStripGPSFromImageFile(at: url)
 }
 
 @MainActor
 func nativePrepareBatchShare(items: [NativeGridItem], client: NativeImmichClient) async -> NativeBatchShareResult {
   var results: [Any] = []
   var failed = 0
+  // Same preference as the viewer share button (default: keep location).
+  let keepGPS = UserDefaults.standard.object(forKey: "immichz_share_include_gps") as? Bool ?? true
   for item in items {
     do {
       if let local = item.local,
          let asset = PHAsset.fetchAssets(withLocalIdentifiers: [local.id], options: nil).firstObject {
-        results.append(try await nativeOriginalFile(for: asset))
+        results.append(try nativeShareFile(try await nativeOriginalFile(for: asset), removeGPS: !keepGPS))
       } else if let server = item.server {
-        results.append(try await client.originalFile(for: server))
+        results.append(try nativeShareFile(try await client.originalFile(for: server), removeGPS: !keepGPS))
       } else {
         failed += 1
       }

@@ -1104,65 +1104,6 @@ struct NativeSharedLinkEditView: View {
   }
 }
 
-struct NativeFoldersView: View {
-  let client: NativeImmichClient
-  @State private var paths: [String] = []
-  @State private var error: String?
-  var body: some View {
-    List {
-      if let error { Text(error).foregroundColor(.red) }
-      if paths.isEmpty && error == nil { Text("暂无服务器文件夹").foregroundColor(.secondary) }
-      ForEach(paths, id: \.self) { path in
-        NavigationLink(path) { NativeFolderAssets(client: client, path: path) }
-      }
-    }
-    .navigationTitle("服务器文件夹")
-    .task {
-      do { paths = try await client.libraryStrings("view/folder/unique-paths"); error = nil }
-      catch { self.error = error.localizedDescription }
-    }
-  }
-}
-
-private struct NativeFolderAssets: View {
-  let client: NativeImmichClient
-  let path: String
-  @State private var assets: [NativeAsset] = []
-  @State private var error: String?
-  var body: some View {
-    VStack {
-      if let error { Text(error).foregroundColor(.red) }
-      NativeResultGrid(client: client, assets: assets, hasOlder: false, loadMore: {})
-    }
-    .navigationTitle((path as NSString).lastPathComponent)
-    .task {
-      do {
-        let rows = try await client.libraryRows("view/folder", query: [URLQueryItem(name: "path", value: path)])
-        assets = rows.compactMap { row in
-          guard let id = row["id"] as? String else { return nil }
-          let text = row["fileCreatedAt"] as? String ?? ""
-          return NativeAsset(id: id, date: ISO8601DateFormatter().date(from: text) ?? .distantPast, isImage: row["type"] as? String != "VIDEO", isFavorite: row["isFavorite"] as? Bool ?? false, thumbhash: row["thumbhash"] as? String, livePhotoVideoId: row["livePhotoVideoId"] as? String)
-        }
-        error = nil
-      } catch { self.error = error.localizedDescription }
-    }
-  }
-}
-
-extension NativeImmichClient {
-  func libraryStrings(_ path: String) async throws -> [String] {
-    let base = config.apiEndpoint ?? (Self.normalize(config.serverUrl) + "/api")
-    guard let url = URL(string: base + "/" + path) else { throw NativeLibraryError.invalidResponse }
-    var request = URLRequest(url: url)
-    if let token = config.accessToken { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-    if let key = config.apiKey { request.setValue(key, forHTTPHeaderField: "x-api-key") }
-    let (data, response) = try await URLSession.shared.data(for: request)
-    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-          let strings = try JSONSerialization.jsonObject(with: data) as? [String] else { throw NativeLibraryError.invalidResponse }
-    return strings
-  }
-}
-
 // The main branch publishes this manifest together with its unsigned IPA.
 // The app downloads the IPA to a temporary file, verifies its SHA-256 against
 // this manifest, and presents the standard iOS Share Sheet with LiveContainer

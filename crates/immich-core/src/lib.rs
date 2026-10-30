@@ -57,9 +57,12 @@ impl ImmichCore {
         std::fs::create_dir_all(&cache_path)?;
 
         let saved_url = db.get_config("server_url").unwrap_or(None);
-        let saved_key = db.get_config("api_key").unwrap_or(None);
+        // Credentials live in the platform secure store (Keychain etc.) and are handed
+        // to us per session via login_server; never keep a plaintext copy in SQLite.
+        // Purge any key persisted by older builds.
+        let _ = db.delete_config("api_key");
 
-        let client = Arc::new(RwLock::new(ImmichClient::new(saved_url, saved_key)));
+        let client = Arc::new(RwLock::new(ImmichClient::new(saved_url, None)));
 
         Ok(Self {
             db,
@@ -84,7 +87,7 @@ impl ImmichCore {
 
     pub async fn login_server(&self, server_url: &str, api_key: &str) -> Result<String, CoreError> {
         self.db.set_config("server_url", server_url)?;
-        self.db.set_config("api_key", api_key)?;
+        // The API key is intentionally kept in memory only.
 
         {
             let mut client = self.client.write().await;
@@ -262,7 +265,7 @@ impl ImmichCore {
         let mut tombstoned_results = Vec::new();
 
         for item in candidates {
-            if self.db.is_upload_tombstoned(&item.id).unwrap_or(false) {
+            if self.db.is_upload_tombstoned(&item.id, &self.active_account()).unwrap_or(false) {
                 tombstoned_results.push(client::BulkUploadCheckResult {
                     id: item.id,
                     action: "reject".to_string(),
@@ -310,7 +313,7 @@ impl ImmichCore {
         live_photo_name: Option<&str>,
     ) -> Result<client::AssetUploadResponse, CoreError> {
         // Check tombstone
-        if self.db.is_upload_tombstoned(device_asset_id).unwrap_or(false) {
+        if self.db.is_upload_tombstoned(device_asset_id, &self.active_account()).unwrap_or(false) {
             return Err(CoreError::Client(client::ClientError::ServerStatus(
                 reqwest::StatusCode::CONFLICT,
                 "Asset is tombstoned and cannot be auto-uploaded".to_string(),
@@ -372,13 +375,71 @@ impl ImmichCore {
 
     /// Remove an upload tombstone
     pub fn remove_upload_tombstone(&self, local_asset_id: &str) -> Result<(), CoreError> {
-        self.db.remove_upload_tombstone(local_asset_id).map_err(CoreError::Db)
+        self.db
+            .remove_upload_tombstone(local_asset_id, &self.active_account())
+            .map_err(CoreError::Db)
+    }
+
+    /// Account (server+user key chosen by the platform layer) that tombstone checks apply to.
+    /// Persisted in the DB so it survives core re-initialization.
+    pub fn set_active_account(&self, account_id: &str) -> Result<(), CoreError> {
+        self.db.set_config("active_account", account_id).map_err(CoreError::Db)
+    }
+
+    pub fn active_account(&self) -> String {
+        self.db
+            .get_config("active_account")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    pub fn is_upload_tombstoned(&self, local_asset_id: &str) -> bool {
+        self.db
+            .is_upload_tombstoned(local_asset_id, &self.active_account())
+            .unwrap_or(false)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tombstones_are_scoped_per_account() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let core = ImmichCore::init_in_memory(temp_dir.path()).unwrap();
+
+        core.db.add_upload_tombstone("local-1", "srv|alice", "deleted_from_cloud").unwrap();
+
+        core.set_active_account("srv|alice").unwrap();
+        assert!(core.is_upload_tombstoned("local-1"));
+
+        // Another account must not inherit the suppression.
+        core.set_active_account("srv|bob").unwrap();
+        assert!(!core.is_upload_tombstoned("local-1"));
+
+        // Removing under bob does not lift alice's tombstone.
+        core.remove_upload_tombstone("local-1").unwrap();
+        core.set_active_account("srv|alice").unwrap();
+        assert!(core.is_upload_tombstoned("local-1"));
+
+        // Clearing cached data must not lift suppression.
+        core.db.clear_all().unwrap();
+        core.set_active_account("srv|alice").unwrap();
+        assert!(core.is_upload_tombstoned("local-1"));
+        core.remove_upload_tombstone("local-1").unwrap();
+        assert!(!core.is_upload_tombstoned("local-1"));
+    }
+
+    #[tokio::test]
+    async fn test_login_does_not_persist_api_key() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let core = ImmichCore::init_in_memory(temp_dir.path()).unwrap();
+        // Unreachable host: ping fails, but credentials must never hit SQLite anyway.
+        let _ = core.login_server("http://127.0.0.1:1", "secret-key").await;
+        assert!(core.db.get_config("api_key").unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn test_core_engine_in_memory() {

@@ -69,6 +69,8 @@ struct NativeCollectionBrowser: View {
   @State private var isSelecting = false
   @State private var selectedIDs = Set<String>()
   @State private var latestRequest = 0
+  @State private var userMoved = false
+  @State private var refreshing = false
   @State private var busy = false
   @State private var message: String?
   @State private var sharePayload: NativeSharePayload?
@@ -123,26 +125,60 @@ struct NativeCollectionBrowser: View {
         onDeleteItem: { item, scope in applyDeletion([item], scope: scope) },
         onServerAssetUpdated: { serverOverrides[$0.id] = $0 },
         onServerAssetArchived: { id in hiddenServerIDs.insert(id) },
-        isSelecting: $isSelecting, selectedIDs: $selectedIDs, loadMore: loadMore
+        isSelecting: $isSelecting, selectedIDs: $selectedIDs, userMoved: $userMoved, loadMore: loadMore
       )
       if loading { ProgressView().padding(6) }
     }
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
+      // Same chrome as the Photos tab: refresh + count on the left, centered title,
+      // select / select-all on the right.
       ToolbarItem(placement: .navigationBarLeading) {
-        if isSelecting { Button("取消") { clearSelection() }.disabled(busy) }
+        if isSelecting {
+          Button("取消") { clearSelection() }.disabled(busy)
+        } else {
+          HStack(spacing: 8) {
+            Button {
+              Task {
+                refreshing = true
+                await refresh()
+                refreshing = false
+              }
+            } label: {
+              if refreshing || loading {
+                ProgressView().scaleEffect(0.7).frame(width: 36, height: 32)
+              } else {
+                Image(systemName: "arrow.clockwise")
+                  .font(.system(size: 16, weight: .medium))
+                  .foregroundColor(.secondary)
+                  .frame(width: 20, height: 20)
+                  .frame(width: 36, height: 32)
+                  .contentShape(Rectangle())
+              }
+            }
+            .buttonStyle(.plain)
+            .disabled(busy || refreshing || loading)
+            .accessibilityLabel("刷新照片")
+            Text("\(items.count) 项").font(.caption).foregroundColor(.secondary)
+          }
+        }
       }
       ToolbarItem(placement: .principal) {
         if isSelecting { Text("已选 \(selectedIDs.count) 项").font(.headline) }
+        else { Text(title).font(.headline).lineLimit(1) }
       }
       ToolbarItem(placement: .navigationBarTrailing) {
         Button(isSelecting ? (selectedIDs.count == items.count && !items.isEmpty ? "取消全选" : "全选") : "选择") {
           if isSelecting {
             let all = Set(items.map(\.id))
             selectedIDs = selectedIDs == all ? [] : all
-          } else { isSelecting = true }
+          } else {
+            isSelecting = true
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+          }
         }
+        .font(.system(size: 15, weight: .medium))
         .disabled(busy || items.isEmpty)
         .accessibilityHint(isSelecting ? "仅选择当前已加载的照片" : "进入多选")
       }
@@ -164,15 +200,40 @@ struct NativeCollectionBrowser: View {
         .opacity(isSelecting ? 1 : 0)
         .allowsHitTesting(isSelecting && !busy)
         .accessibilityHidden(!isSelecting)
-        HStack {
-          if busy { ProgressView() }
-          Text(message ?? "\(items.count) 项").font(.caption).lineLimit(2)
-          Spacer(minLength: 4)
-          if message != nil { Button("关闭提示") { message = nil }.font(.caption) }
-          Button("最新") { latestRequest += 1 }
+
+        VStack(spacing: 6) {
+          if let message {
+            HStack(spacing: 8) {
+              Text(message).font(.caption).lineLimit(3)
+              Spacer(minLength: 4)
+              Button { self.message = nil } label: {
+                Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("关闭操作提示")
+            }
+            .padding(6)
+          }
+          if userMoved {
+            Button {
+              latestRequest += 1
+            } label: {
+              HStack(spacing: 3) {
+                Image(systemName: "arrow.down").font(.system(size: 11, weight: .bold))
+                Text("最新").font(.system(size: 12, weight: .semibold))
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 6)
+              .background(.ultraThinMaterial)
+              .clipShape(Capsule())
+              .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 6)
+            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+          }
         }
-        .padding(.horizontal, 16).frame(minHeight: 62)
-        .background(.ultraThinMaterial)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: userMoved)
         .opacity(isSelecting ? 0 : 1)
         .allowsHitTesting(!isSelecting)
         .accessibilityHidden(isSelecting)

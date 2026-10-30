@@ -84,6 +84,11 @@ private func c_immich_ios_add_upload_tombstone(
   _ reason: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("immich_ios_set_active_account")
+private func c_immich_ios_set_active_account(
+  _ accountId: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("immich_ios_is_upload_tombstoned")
 private func c_immich_ios_is_upload_tombstoned(
   _ localAssetId: UnsafePointer<CChar>?
@@ -214,6 +219,26 @@ public final class ImmichCoreBridge: @unchecked Sendable {
 
   private init() {}
 
+  private let accountLock = NSLock()
+  private var activeAccountId = ""
+
+  /// Scopes upload-tombstone checks to the current server+user. Remembered here and
+  /// re-applied after every core (re)initialization.
+  public func setActiveAccount(_ accountId: String?) {
+    accountLock.lock()
+    activeAccountId = accountId ?? ""
+    accountLock.unlock()
+    applyActiveAccount()
+  }
+
+  private func applyActiveAccount() {
+    if isMockMode || !c_immich_ios_is_initialized() { return }
+    accountLock.lock()
+    let id = activeAccountId
+    accountLock.unlock()
+    let _: Bool? = try? invokeFfi { id.withCString { c_immich_ios_set_active_account($0) } }
+  }
+
   public var isInitialized: Bool {
     if isMockMode { return true }
     return c_immich_ios_is_initialized()
@@ -245,6 +270,7 @@ public final class ImmichCoreBridge: @unchecked Sendable {
           }
         }
       }
+      applyActiveAccount()
       return res
     }.value
   }

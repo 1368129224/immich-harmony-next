@@ -371,12 +371,26 @@ pub extern "C" fn immich_ios_add_upload_tombstone(
     make_json_response(run())
 }
 
+/// Select the account that tombstone checks/removals apply to (server+user key).
+#[no_mangle]
+pub extern "C" fn immich_ios_set_active_account(account_id: *const c_char) -> *mut c_char {
+    let run = || -> Result<bool, String> {
+        let acc = c_str_to_rust(account_id)?;
+        let core = get_core()?;
+        core.set_active_account(&acc)
+            .map_err(|e| format!("Set active account error: {}", e))?;
+        Ok(true)
+    };
+
+    make_json_response(run())
+}
+
 /// Check if a local asset is tombstoned
 #[no_mangle]
 pub extern "C" fn immich_ios_is_upload_tombstoned(local_asset_id: *const c_char) -> bool {
     if let Ok(local_id) = c_str_to_rust(local_asset_id) {
         if let Ok(core) = get_core() {
-            return core.db.is_upload_tombstoned(&local_id).unwrap_or(false);
+            return core.is_upload_tombstoned(&local_id);
         }
     }
     false

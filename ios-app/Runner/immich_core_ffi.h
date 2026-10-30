@@ -122,7 +122,7 @@ char *immich_ios_add_upload_tombstone(
 );
 
 /**
- * Check if a local asset is tombstoned.
+ * Check if a local asset is tombstoned for the active account.
  */
 bool immich_ios_is_upload_tombstoned(const char *local_asset_id);
 
@@ -138,5 +138,11 @@ char *immich_ios_get_upload_tombstones(void);
  * Caller MUST free the returned string using immich_ios_free_string().
  */
 char *immich_ios_remove_upload_tombstone(const char *local_asset_id);
+
+/**
+ * Select the account (server+user key) that tombstone checks/removals apply to.
+ * Caller MUST free the returned string using immich_ios_free_string().
+ */
+char *immich_ios_set_active_account(const char *account_id);
 
 #endif /* IMMICH_CORE_FFI_H */

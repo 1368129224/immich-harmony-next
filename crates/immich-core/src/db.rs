@@ -75,11 +75,15 @@ impl DbEngine {
             CREATE INDEX IF NOT EXISTS idx_assets_bucket ON assets(bucket_id);
             CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(file_created_at DESC);
 
-            CREATE TABLE IF NOT EXISTS upload_tombstones (
-                local_asset_id TEXT PRIMARY KEY,
+            -- Legacy single-key table (never populated by the app); replaced by the
+            -- account-scoped table below so one account's suppression can't block another.
+            DROP TABLE IF EXISTS upload_tombstones;
+            CREATE TABLE IF NOT EXISTS account_upload_tombstones (
+                local_asset_id TEXT NOT NULL,
                 account_id TEXT NOT NULL,
                 reason TEXT NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (local_asset_id, account_id)
             );
 
             CREATE TABLE IF NOT EXISTS upload_sync_status (
@@ -103,6 +107,12 @@ impl DbEngine {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_config(&self, key: &str) -> Result<(), DbError> {
+        let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
+        conn.execute("DELETE FROM server_config WHERE key = ?1", params![key])?;
         Ok(())
     }
 
@@ -329,7 +339,6 @@ impl DbEngine {
             "DELETE FROM assets;
              DELETE FROM buckets;
              DELETE FROM server_config;
-             DELETE FROM upload_tombstones;
              DELETE FROM upload_sync_status;",
         )?;
         Ok(())
@@ -345,10 +354,9 @@ impl DbEngine {
             .unwrap_or_default()
             .as_secs() as i64;
         conn.execute(
-            "INSERT INTO upload_tombstones (local_asset_id, account_id, reason, created_at)
+            "INSERT INTO account_upload_tombstones (local_asset_id, account_id, reason, created_at)
              VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(local_asset_id) DO UPDATE SET
-                account_id = excluded.account_id,
+             ON CONFLICT(local_asset_id, account_id) DO UPDATE SET
                 reason = excluded.reason,
                 created_at = excluded.created_at",
             params![local_id, account_id, reason, now],
@@ -357,17 +365,19 @@ impl DbEngine {
     }
 
     /// Check if a local asset has a tombstone preventing auto-upload
-    pub fn is_upload_tombstoned(&self, local_id: &str) -> Result<bool, DbError> {
+    pub fn is_upload_tombstoned(&self, local_id: &str, account_id: &str) -> Result<bool, DbError> {
         let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
-        let mut stmt = conn.prepare("SELECT 1 FROM upload_tombstones WHERE local_asset_id = ?1")?;
-        let exists = stmt.exists(params![local_id])?;
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM account_upload_tombstones WHERE local_asset_id = ?1 AND account_id = ?2",
+        )?;
+        let exists = stmt.exists(params![local_id, account_id])?;
         Ok(exists)
     }
 
     /// Retrieve all tombstones as (local_asset_id, account_id, reason, created_at)
     pub fn get_all_upload_tombstones(&self) -> Result<Vec<(String, String, String, i64)>, DbError> {
         let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
-        let mut stmt = conn.prepare("SELECT local_asset_id, account_id, reason, created_at FROM upload_tombstones ORDER BY created_at DESC")?;
+        let mut stmt = conn.prepare("SELECT local_asset_id, account_id, reason, created_at FROM account_upload_tombstones ORDER BY created_at DESC")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
@@ -379,11 +389,11 @@ impl DbEngine {
     }
 
     /// Remove a tombstone if user manually triggers upload
-    pub fn remove_upload_tombstone(&self, local_id: &str) -> Result<(), DbError> {
+    pub fn remove_upload_tombstone(&self, local_id: &str, account_id: &str) -> Result<(), DbError> {
         let conn = self.conn.lock().map_err(|_| DbError::Poisoned)?;
         conn.execute(
-            "DELETE FROM upload_tombstones WHERE local_asset_id = ?1",
-            params![local_id],
+            "DELETE FROM account_upload_tombstones WHERE local_asset_id = ?1 AND account_id = ?2",
+            params![local_id, account_id],
         )?;
         Ok(())
     }

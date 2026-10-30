@@ -125,42 +125,6 @@ func nativePhotosSourceIncludes(_ source: NativePhotosSource, hasLocal: Bool, ha
   }
 }
 
-func nativeIndexAssetsBySecond(_ assets: [NativeAsset]) -> [Int64: [NativeAsset]] {
-  var dict: [Int64: [NativeAsset]] = [:]
-  for asset in assets {
-    let sec = Int64(asset.date.timeIntervalSince1970)
-    dict[sec, default: []].append(asset)
-  }
-  return dict
-}
-
-func nativeFindHeuristicServerMatch(
-  local: NativeDeviceAsset,
-  serverBySecond: [Int64: [NativeAsset]],
-  usedServerIDs: Set<String>
-) -> NativeAsset? {
-  let localSec = Int64(local.date.timeIntervalSince1970)
-  var candidateMatch: NativeAsset? = nil
-  var bestDiff: TimeInterval = 2.01
-
-  for s in (localSec - 2)...(localSec + 2) {
-    guard let bucket = serverBySecond[s] else { continue }
-    for candidate in bucket {
-      guard !usedServerIDs.contains(candidate.id) else { continue }
-      guard local.isVideo == !candidate.isImage else { continue }
-      let diff = abs(local.date.timeIntervalSince(candidate.date))
-      if diff <= 2.0 && diff < bestDiff {
-        if local.isLivePhoto && candidate.livePhotoVideoId == nil && candidateMatch?.livePhotoVideoId != nil {
-          continue
-        }
-        bestDiff = diff
-        candidateMatch = candidate
-      }
-    }
-  }
-  return candidateMatch
-}
-
 func nativePhotosSelectionActionAvailability(_ items: [NativeGridItem]) -> (server: Int, local: Int, merged: Int) {
   let server = items.filter { $0.server != nil }.count
   let local = items.filter { $0.local != nil }.count
@@ -1059,6 +1023,9 @@ struct NativeResultGrid: View {
   var onServerAssetArchived: ((String) -> Void)? = nil
   var isSelectingBinding: Binding<Bool>? = nil
   var selectedIDsBinding: Binding<Set<String>>? = nil
+  /// Mirrors "user scrolled away from the latest edge" so a parent can show the
+  /// floating 最新 capsule exactly like the Photos tab.
+  var userMovedBinding: Binding<Bool>? = nil
   let loadMore: () -> Void
 
   @State private var internalIsSelecting = false
@@ -1125,6 +1092,7 @@ struct NativeResultGrid: View {
     onServerAssetArchived: ((String) -> Void)? = nil,
     isSelecting: Binding<Bool>? = nil,
     selectedIDs: Binding<Set<String>>? = nil,
+    userMoved: Binding<Bool>? = nil,
     loadMore: @escaping () -> Void
   ) {
     self.client = client
@@ -1141,6 +1109,7 @@ struct NativeResultGrid: View {
     self.onServerAssetArchived = onServerAssetArchived
     self.isSelectingBinding = isSelecting
     self.selectedIDsBinding = selectedIDs
+    self.userMovedBinding = userMoved
     self.loadMore = loadMore
   }
 
@@ -1163,6 +1132,16 @@ struct NativeResultGrid: View {
     return Dictionary(grouping: merged) { calendar.startOfDay(for: $0.date) }
   }
 
+  /// Same day sections / titles the Photos tab produces at its default "日" level.
+  private var daySections: [NativeTimelineSection] {
+    let days = nativeSortedResultDays(Array(mergedGroups.keys), oldestFirst: startsAtLatest)
+    let groups = days.map { NativeDayGroup(date: $0, assets: mergedGroups[$0] ?? []) }
+    if preservesServerOrder {
+      return groups.map { NativeTimelineSection(title: nil, date: $0.date, assets: $0.assets) }
+    }
+    return nativeTimelineSections(from: groups, level: "日", calendar: .autoupdatingCurrent)
+  }
+
   private var visualOrderedAssetIDs: [String] {
     let groups = mergedGroups
     return nativeSortedResultDays(Array(groups.keys), oldestFirst: startsAtLatest)
@@ -1177,17 +1156,21 @@ struct NativeResultGrid: View {
             Button("加载更早照片", action: loadMore)
               .frame(maxWidth: .infinity).padding(16)
           }
-          ForEach(
-            nativeSortedResultDays(Array(mergedGroups.keys), oldestFirst: startsAtLatest),
-            id: \.self
-          ) { day in
+          ForEach(daySections) { section in
           VStack(alignment: .leading, spacing: 2) {
-            if !preservesServerOrder {
-              Text(NativeImmichClient.formatChineseDate(day)).font(.headline).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+            // Photos-tab style: compact caption header only at dense layouts,
+            // otherwise a date badge on the first thumbnail of each day.
+            if let title = section.title, columns > 6 {
+              Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 6)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
             }
             let gridSpacing: CGFloat = columns > 7 ? 1 : 2
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns), spacing: gridSpacing) {
-              ForEach(mergedGroups[day] ?? []) { entry in
+              ForEach(section.assets) { entry in
                 ZStack(alignment: .topTrailing) {
                   Color.clear
                     .aspectRatio(1, contentMode: .fit)
@@ -1207,12 +1190,27 @@ struct NativeResultGrid: View {
                       }
                     )
                     .clipped()
+                    .overlay(alignment: .topLeading) {
+                      if let title = section.title, columns <= 6, entry.id == section.assets.first?.id {
+                        Text(title)
+                          .font(.system(size: max(9, 13 - CGFloat(columns)), weight: .bold))
+                          .foregroundColor(.white)
+                          .lineLimit(1)
+                          .minimumScaleFactor(0.7)
+                          .padding(.horizontal, 4)
+                          .padding(.vertical, 2)
+                          .background(.black.opacity(0.65))
+                          .cornerRadius(3)
+                          .allowsHitTesting(false)
+                      }
+                    }
                     .overlay(alignment: .bottomLeading) {
                       if entry.isVideo && columns <= 7 {
                         Image(systemName: "play.fill")
                           .font(.system(size: columns > 4 ? 7 : 11, weight: .bold))
                           .foregroundColor(.white).shadow(color: .black, radius: 2)
                           .padding(columns > 4 ? 1.5 : 3)
+                          .allowsHitTesting(false)
                       }
                     }
                     .overlay(alignment: .bottomTrailing) {
@@ -1222,30 +1220,19 @@ struct NativeResultGrid: View {
                           .foregroundColor(.white).shadow(color: .black, radius: 2)
                           .padding(columns > 4 ? 1.5 : 3)
                           .allowsHitTesting(false)
-                          .allowsHitTesting(false)
                       }
                     }
 
-                  if isSelecting {
-                    ZStack {
-                      Circle()
-                        .fill(selectedIDs.contains(entry.id) ? Color.blue : Color.black.opacity(0.35))
-                        .frame(width: 22, height: 22)
-                      if selectedIDs.contains(entry.id) {
-                        Image(systemName: "checkmark")
-                          .font(.system(size: 11, weight: .bold))
-                          .foregroundColor(.white)
-                      } else {
-                        Circle()
-                          .stroke(Color.white, lineWidth: 1.5)
-                          .frame(width: 20, height: 20)
-                      }
-                    }
-                    .padding(columns > 4 ? 2 : 4)
-                    .allowsHitTesting(false)
+                  if selectedIDs.contains(entry.id) {
+                    Image(systemName: "checkmark.circle.fill")
+                      .font(.system(size: columns > 7 ? 12 : (columns > 4 ? 16 : 20), weight: .semibold))
+                      .foregroundStyle(.white, .blue)
+                      .padding(columns > 7 ? 1 : 4)
+                      .allowsHitTesting(false)
                   }
                 }
                 .contentShape(Rectangle())
+                .accessibilityLabel(entry.date.formatted())
                 .id(entry.id)
               }
             }
@@ -1285,6 +1272,7 @@ struct NativeResultGrid: View {
           }
       )
     }
+    .onChange(of: userMovedGrid) { moved in userMovedBinding?.wrappedValue = moved }
     .onDisappear {
       bottomPositionTask?.cancel()
       resetSelectionDrag()
@@ -1599,8 +1587,21 @@ func nativeDeleteGridItems(
   }
   // If the cloud step failed, do not proceed with local deletion. Leaving
   // both copies intact is safer than destroying the last usable original.
-  if failures.isEmpty, !uniqueLocalIDs.isEmpty, !(await device.deleteAssets(ids: uniqueLocalIDs)) {
-    failures.append("本机：照片权限不足或系统删除失败")
+  var localDeleted = false
+  if failures.isEmpty, !uniqueLocalIDs.isEmpty {
+    localDeleted = await device.deleteAssets(ids: uniqueLocalIDs)
+    if !localDeleted { failures.append("本机：照片权限不足或系统删除失败") }
+  }
+  // Anti re-upload (spec §6.4): a cloud copy was removed but its local original is still
+  // on the device. Record a per-account tombstone so auto backup never re-uploads it.
+  if !deletedServerIDs.isEmpty, let accountKey = NativeSyncCacheStore.shared.identity {
+    let survivors = items.compactMap { item -> String? in
+      guard let sid = item.server?.id, deletedServerIDs.contains(sid), let lid = item.local?.id else { return nil }
+      return localDeleted && uniqueLocalIDs.contains(lid) ? nil : lid
+    }
+    for lid in Set(survivors) {
+      try? await ImmichCoreBridge.shared.addUploadTombstone(localAssetId: lid, accountId: accountKey, reason: "deleted_from_cloud")
+    }
   }
   if !failures.isEmpty { throw NativeDeleteOperationError.partial(failures: failures, deletedServerIDs: deletedServerIDs) }
 }
