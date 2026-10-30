@@ -987,6 +987,41 @@ func nativeTimelineQuery(orderBy: NativeTimelineOrderBy, bucketID: String? = nil
 }
 // MARK: - Result grids
 
+/// First asset of every year/month run (in display order) -> "YYYY 年 M 月".
+func nativeMonthMarkerTitles(for items: [NativeGridItem], calendar: Calendar) -> [String: String] {
+  var markers: [String: String] = [:]
+  var lastYear: Int?
+  var lastMonth: Int?
+  for item in items {
+    let year = calendar.component(.year, from: item.date)
+    let month = calendar.component(.month, from: item.date)
+    if year != lastYear || month != lastMonth {
+      markers[item.id] = "\(year) 年 \(month) 月"
+      lastYear = year
+      lastMonth = month
+    }
+  }
+  return markers
+}
+
+/// Floating month label shown over the grid when it is very dense (≥10 columns).
+struct NativeMonthPill: View {
+  let text: String
+  var body: some View {
+    Text(text)
+      .font(.system(size: 15, weight: .semibold))
+      .foregroundColor(.primary)
+      .lineLimit(1)
+      .fixedSize()
+      .padding(.horizontal, 12)
+      .padding(.vertical, 7)
+      .background(.ultraThinMaterial, in: Capsule())
+      .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+      .padding(6)
+      .allowsHitTesting(false)
+  }
+}
+
 func nativeSortedResultDays(_ days: [Date], oldestFirst: Bool) -> [Date] {
   days.sorted { oldestFirst ? $0 < $1 : $0 > $1 }
 }
@@ -1132,14 +1167,12 @@ struct NativeResultGrid: View {
     return Dictionary(grouping: merged) { calendar.startOfDay(for: $0.date) }
   }
 
-  /// Same day sections / titles the Photos tab produces at its default "日" level.
+  /// One continuous run of thumbnails (no per-day boundaries or labels), like the Photos tab.
   private var daySections: [NativeTimelineSection] {
     let days = nativeSortedResultDays(Array(mergedGroups.keys), oldestFirst: startsAtLatest)
-    let groups = days.map { NativeDayGroup(date: $0, assets: mergedGroups[$0] ?? []) }
-    if preservesServerOrder {
-      return groups.map { NativeTimelineSection(title: nil, date: $0.date, assets: $0.assets) }
-    }
-    return nativeTimelineSections(from: groups, level: "日", calendar: .autoupdatingCurrent)
+    let items = days.flatMap { mergedGroups[$0] ?? [] }
+    guard !items.isEmpty else { return [] }
+    return [NativeTimelineSection(title: nil, date: days.first ?? .distantPast, assets: items)]
   }
 
   private var visualOrderedAssetIDs: [String] {
@@ -1156,19 +1189,12 @@ struct NativeResultGrid: View {
             Button("加载更早照片", action: loadMore)
               .frame(maxWidth: .infinity).padding(16)
           }
+          let monthMarkers: [String: String] = columns >= 10
+            ? nativeMonthMarkerTitles(for: daySections.first?.assets ?? [], calendar: .autoupdatingCurrent)
+            : [:]
           ForEach(daySections) { section in
           VStack(alignment: .leading, spacing: 2) {
-            // Photos-tab style: compact caption header only at dense layouts,
-            // otherwise a date badge on the first thumbnail of each day.
-            if let title = section.title, columns > 6 {
-              Text(title)
-                .font(.caption2.weight(.bold))
-                .foregroundColor(.primary)
-                .padding(.horizontal, 6)
-                .padding(.top, 6)
-                .padding(.bottom, 2)
-            }
-            let gridSpacing: CGFloat = columns > 7 ? 1 : 2
+            let gridSpacing: CGFloat = 1
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns), spacing: gridSpacing) {
               ForEach(section.assets) { entry in
                 ZStack(alignment: .topTrailing) {
@@ -1191,18 +1217,7 @@ struct NativeResultGrid: View {
                     )
                     .clipped()
                     .overlay(alignment: .topLeading) {
-                      if let title = section.title, columns <= 6, entry.id == section.assets.first?.id {
-                        Text(title)
-                          .font(.system(size: max(9, 13 - CGFloat(columns)), weight: .bold))
-                          .foregroundColor(.white)
-                          .lineLimit(1)
-                          .minimumScaleFactor(0.7)
-                          .padding(.horizontal, 4)
-                          .padding(.vertical, 2)
-                          .background(.black.opacity(0.65))
-                          .cornerRadius(3)
-                          .allowsHitTesting(false)
-                      }
+                      if let month = monthMarkers[entry.id] { NativeMonthPill(text: month) }
                     }
                     .overlay(alignment: .bottomLeading) {
                       if entry.isVideo && columns <= 7 {
@@ -1233,6 +1248,7 @@ struct NativeResultGrid: View {
                 }
                 .contentShape(Rectangle())
                 .accessibilityLabel(entry.date.formatted())
+                .zIndex(monthMarkers[entry.id] != nil ? 1 : 0)
                 .id(entry.id)
               }
             }

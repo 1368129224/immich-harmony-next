@@ -1517,6 +1517,8 @@ struct NativePhotosView: View {
   @State private var sourceFilter: NativePhotosSource = .all
   @State private var cachedDayGroups: [NativeDayGroup] = []
   @State private var cachedTimelineSections: [String: [NativeTimelineSection]] = [:]
+  /// assetID -> "YYYY 年 M 月" for the first asset of each month (floating month pill at ≥10 columns).
+  @State private var cachedMonthMarkers: [String: String] = [:]
   @State private var launchPreviewItems: [NativeGridItem]?
   @State private var cachedExcludedLocalIDs = Set<String>()
   @State private var localExclusionsReady = true
@@ -1902,7 +1904,8 @@ struct NativePhotosView: View {
                     .padding(.top, selectedTimelineLevel == "年" ? 12 : 6)
                     .padding(.bottom, 2)
                 }
-                let gridSpacing: CGFloat = columns > 7 ? 1 : 2
+                let isContinuousLevel = selectedTimelineLevel != "年" && selectedTimelineLevel != "月"
+                let gridSpacing: CGFloat = isContinuousLevel ? 1 : (columns > 7 ? 1 : 2)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns), spacing: gridSpacing) {
                   ForEach(section.assets) { entry in
                     Color.clear
@@ -1938,17 +1941,8 @@ struct NativePhotosView: View {
                       )
                       .clipped()
                       .overlay(alignment: .topLeading) {
-                        if selectedTimelineLevel != "年" && selectedTimelineLevel != "月" && columns <= 6 && entry.id == section.assets.first?.id {
-                          Text(section.title ?? "")
-                            .font(.system(size: max(9, 13 - CGFloat(columns)), weight: .bold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(.black.opacity(0.65))
-                            .cornerRadius(3)
-                            .allowsHitTesting(false)
+                        if isContinuousLevel, columns >= 10, let month = cachedMonthMarkers[entry.id] {
+                          NativeMonthPill(text: month)
                         }
                       }
                       .overlay(alignment: .bottomLeading) {
@@ -2030,6 +2024,7 @@ struct NativePhotosView: View {
                           Label("删除", systemImage: "trash")
                         }
                       })
+                      .zIndex(isContinuousLevel && columns >= 10 && cachedMonthMarkers[entry.id] != nil ? 1 : 0)
                       .id(entry.id)
                   }
                 }
@@ -3265,12 +3260,18 @@ struct NativePhotosView: View {
     }
     cachedDayGroups = groups
     // Calculate only when assets change, never on a SwiftUI body/layout pass.
-    let daySections = nativeTimelineSections(from: groups, level: "日", calendar: calendar)
+    // 日 / 所有照片: one continuous grid (like the system Photos library): no day
+    // boundaries or day labels; rows flow across days without gaps.
+    let allItems = groups.flatMap(\.assets)
+    let continuous = allItems.isEmpty ? [] : [
+      NativeTimelineSection(title: nil, date: groups.first?.date ?? .distantPast, assets: allItems)
+    ]
+    cachedMonthMarkers = nativeMonthMarkerTitles(for: allItems, calendar: calendar)
     cachedTimelineSections = [
       "年": nativeTimelineSections(from: groups, level: "年", calendar: calendar),
       "月": nativeTimelineSections(from: groups, level: "月", calendar: calendar),
-      "日": daySections,
-      "所有照片": daySections
+      "日": continuous,
+      "所有照片": continuous
     ]
   }
 
