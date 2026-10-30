@@ -45,6 +45,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios/DerivedData \
             "MARKETING_VERSION=0.0.2+$COMMIT_HASH" \
+            "CURRENT_PROJECT_VERSION=$((1000 + GITHUB_RUN_NUMBER))" \
             "IMMICH_GIT_COMMIT=$COMMIT_HASH" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -201,6 +202,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios/SignedDerivedData \
             "MARKETING_VERSION=0.0.2+$COMMIT_HASH" \
+            "CURRENT_PROJECT_VERSION=$((1000 + GITHUB_RUN_NUMBER))" \
             "IMMICH_GIT_COMMIT=$COMMIT_HASH" \
             "PROVISIONING_PROFILE_SPECIFIER=$PROVISIONING_PROFILE_UUID" \
             "DEVELOPMENT_TEAM=$APPLE_TEAM_ID" \

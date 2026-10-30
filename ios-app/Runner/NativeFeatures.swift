@@ -1061,6 +1061,8 @@ struct NativeResultGrid: View {
   /// Mirrors "user scrolled away from the latest edge" so a parent can show the
   /// floating 最新 capsule exactly like the Photos tab.
   var userMovedBinding: Binding<Bool>? = nil
+  /// Album / memory browsers enter multi-select only through the toolbar button.
+  var longPressStartsSelection = true
   let loadMore: () -> Void
 
   @State private var internalIsSelecting = false
@@ -1128,6 +1130,7 @@ struct NativeResultGrid: View {
     isSelecting: Binding<Bool>? = nil,
     selectedIDs: Binding<Set<String>>? = nil,
     userMoved: Binding<Bool>? = nil,
+    longPressStartsSelection: Bool = true,
     loadMore: @escaping () -> Void
   ) {
     self.client = client
@@ -1145,6 +1148,7 @@ struct NativeResultGrid: View {
     self.isSelectingBinding = isSelecting
     self.selectedIDsBinding = selectedIDs
     self.userMovedBinding = userMoved
+    self.longPressStartsSelection = longPressStartsSelection
     self.loadMore = loadMore
   }
 
@@ -1406,11 +1410,12 @@ struct NativeResultGrid: View {
         guard !isMagnifying else { return }
         switch phase {
         case .first(true):
-          guard !isSelecting else { return }
+          guard !isSelecting, longPressStartsSelection else { return }
           longPressSelectionActive = true
           enterSelection(startingWith: entry.id)
         case .second(true, let drag):
           if !isSelecting {
+            guard longPressStartsSelection else { return }
             longPressSelectionActive = true
             enterSelection(startingWith: entry.id)
           }

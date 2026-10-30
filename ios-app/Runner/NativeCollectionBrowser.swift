@@ -125,7 +125,7 @@ struct NativeCollectionBrowser: View {
         onDeleteItem: { item, scope in applyDeletion([item], scope: scope) },
         onServerAssetUpdated: { serverOverrides[$0.id] = $0 },
         onServerAssetArchived: { id in hiddenServerIDs.insert(id) },
-        isSelecting: $isSelecting, selectedIDs: $selectedIDs, userMoved: $userMoved, loadMore: loadMore
+        isSelecting: $isSelecting, selectedIDs: $selectedIDs, userMoved: $userMoved, longPressStartsSelection: false, loadMore: loadMore
       )
       if loading { ProgressView().padding(6) }
     }
@@ -169,18 +169,28 @@ struct NativeCollectionBrowser: View {
         else { Text(title).font(.headline).lineLimit(1) }
       }
       ToolbarItem(placement: .navigationBarTrailing) {
-        Button(isSelecting ? (selectedIDs.count == items.count && !items.isEmpty ? "取消全选" : "全选") : "选择") {
-          if isSelecting {
+        if isSelecting {
+          Button(selectedIDs.count == items.count && !items.isEmpty ? "取消全选" : "全选") {
             let all = Set(items.map(\.id))
             selectedIDs = selectedIDs == all ? [] : all
-          } else {
+          }
+          .font(.system(size: 15, weight: .medium))
+          .disabled(busy || items.isEmpty)
+          .accessibilityHint("仅选择当前已加载的照片")
+        } else {
+          Button {
             isSelecting = true
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
+          } label: {
+            Image(systemName: "checkmark.circle")
+              .font(.system(size: 18, weight: .regular))
+              .frame(width: 36, height: 32)
+              .contentShape(Rectangle())
           }
+          .disabled(busy || items.isEmpty)
+          .accessibilityLabel("选择")
+          .accessibilityHint("进入多选")
         }
-        .font(.system(size: 15, weight: .medium))
-        .disabled(busy || items.isEmpty)
-        .accessibilityHint(isSelecting ? "仅选择当前已加载的照片" : "进入多选")
       }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {

@@ -1785,12 +1785,18 @@ struct NativePhotosView: View {
         }
         .font(.system(size: 15, weight: .medium))
       } else {
-        Button("选择") {
+        Button {
           isSelecting = true
           UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+          Image(systemName: "checkmark.circle")
+            .font(.system(size: 18, weight: .regular))
+            .frame(width: 36, height: 32)
+            .contentShape(Rectangle())
         }
-        .font(.system(size: 15, weight: .medium))
         .disabled(!isInitialTimelineVisible || totalDisplayCount == 0)
+        .accessibilityLabel("选择")
+        .accessibilityHint("进入多选")
       }
 
       // 服务器状态按钮
