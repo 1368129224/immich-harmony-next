@@ -8,7 +8,9 @@
 #   sign      用 cert/ 下的证书签名 unsigned IPA
 #   push      推送已签名 IPA 到 iPhone 并启动
 #   deploy    sign + push 一键完成
-#   relay     管理安卓中继服务 (start/stop/status)
+#   relay     管理安卓中继服务 (start/stop/status/ensure)
+#             ensure = 探测中继，不健康时自动同步脚本并重启，直到识别到 iPhone
+#             （push / deploy 已自动执行，无需再手动 relay start）
 #   clean     清理临时文件
 #
 # 示例:
@@ -189,7 +191,10 @@ cmd_push() {
   [[ -f "$target" ]] || { err "IPA 不存在: $target"; exit 1; }
   info "推送: $target ($(du -h "$target" | cut -f1))"
   echo ""
-  bash "$SCRIPTS/push_tunnel.sh" "$target"
+  # 每次推送前自动保证中继可用，不再需要手动 relay start
+  cmd_relay_ensure || exit 1
+  echo ""
+  RELAY_ENSURED=1 bash "$SCRIPTS/push_tunnel.sh" "$target"
 }
 
 # ------------------------------------------------------------------------------
@@ -206,12 +211,80 @@ cmd_deploy() {
 # ------------------------------------------------------------------------------
 relay_adb() { adb -s "$ADB_TARGET" "$@" 2>/dev/null; }
 
+RELAY_HOME="/data/data/com.termux/files/home"
+RELAY_SCRIPT_LOCAL="$SCRIPTS/start_ios_relay.sh"
+
+# 保证安卓上的 start_ios_relay.sh 与仓库一致（脚本漂移是"必须手动 relay start"的常见原因）
+relay_sync_script() {
+  [[ -f "$RELAY_SCRIPT_LOCAL" ]] || return 0
+  local local_sum remote_sum
+  local_sum=$(md5sum "$RELAY_SCRIPT_LOCAL" | cut -d' ' -f1)
+  remote_sum=$(adb -s "$ADB_TARGET" shell "su -c 'md5sum $RELAY_HOME/start_ios_relay.sh 2>/dev/null'" 2>/dev/null | tr -d '\r' | cut -d' ' -f1)
+  if [[ "$local_sum" != "$remote_sum" ]]; then
+    info "同步中继脚本到安卓..."
+    adb -s "$ADB_TARGET" push "$RELAY_SCRIPT_LOCAL" /data/local/tmp/start_ios_relay.sh >/dev/null 2>&1 \
+      && adb -s "$ADB_TARGET" shell "su -c 'cp /data/local/tmp/start_ios_relay.sh $RELAY_HOME/start_ios_relay.sh && chmod 755 $RELAY_HOME/start_ios_relay.sh'" >/dev/null 2>&1 \
+      || warn "脚本同步失败，沿用安卓上现有版本"
+  fi
+}
+
 cmd_relay_start() {
   info "启动安卓中继服务..."
-  relay_adb shell "su -c 'bash /data/data/com.termux/files/home/start_ios_relay.sh'" 2>/dev/null \
+  adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+  relay_sync_script
+  relay_adb shell "su -c 'bash $RELAY_HOME/start_ios_relay.sh'" 2>/dev/null \
     || su_direct_start
   echo ""
   cmd_relay_status
+}
+
+# 静默探测：0 = 健康（ADB 通、usbmuxd 在跑、USB 配置 4、iPhone 可枚举）；失败原因写入 RELAY_REASON
+RELAY_REASON=""
+relay_probe() {
+  RELAY_REASON=""
+  adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+  local state
+  state=$(adb -s "$ADB_TARGET" get-state 2>/dev/null || echo "offline")
+  [[ "$state" == "device" ]] || { RELAY_REASON="ADB 不可达($state)"; return 2; }
+
+  relay_adb shell "ps -ef | grep 'usbmuxd -f' | grep -v grep" | grep -q usbmuxd \
+    || { RELAY_REASON="usbmuxd 未运行"; return 1; }
+
+  local cfg
+  cfg=$(relay_adb shell "su -c 'for d in /sys/bus/usb/devices/*; do if [ -f \$d/idVendor ] && [ \$(cat \$d/idVendor 2>/dev/null) = 05ac ]; then cat \$d/bConfigurationValue; fi; done'" | tr -d '\r\n ')
+  [[ "$cfg" == "4" ]] || { RELAY_REASON="iPhone USB 配置为 '${cfg:-无设备}'（应为 4）"; return 1; }
+
+  adb -s "$ADB_TARGET" shell "su -c 'PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- pymobiledevice3 usbmux list 2>/dev/null'" 2>/dev/null \
+    | grep -q "DeviceName" || { RELAY_REASON="pymobiledevice3 未枚举到 iPhone"; return 1; }
+  return 0
+}
+
+# 自动保证中继可用：健康则直接返回；否则重启中继并重试。--force 跳过首次探测直接重启。
+cmd_relay_ensure() {
+  local force=false attempts=3 i
+  [[ "${1:-}" == "--force" ]] && force=true
+  if [[ "$force" == false ]] && relay_probe; then
+    ok "安卓中继就绪，iPhone 已识别"
+    return 0
+  fi
+  [[ "$force" == true ]] || warn "中继未就绪: $RELAY_REASON，自动恢复中..."
+  [[ "$RELAY_REASON" == ADB* && "$force" == false ]] && { err "ADB 不可达，无法自动恢复（检查 Tailscale / 网络 ADB）"; return 1; }
+  for ((i=1; i<=attempts; i++)); do
+    info "恢复中继 ($i/$attempts)..."
+    adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+    relay_sync_script
+    relay_adb shell "su -c 'bash $RELAY_HOME/start_ios_relay.sh'" >/dev/null 2>&1 || su_direct_start >/dev/null 2>&1 || true
+    # 等待 iPhone 重新枚举完成（最长约 15 秒）
+    local w
+    for w in 1 2 3 4 5; do
+      relay_probe && { ok "中继已恢复，iPhone 已识别"; return 0; }
+      sleep 3
+    done
+    warn "第 $i 次未恢复: $RELAY_REASON"
+  done
+  err "中继无法恢复: $RELAY_REASON"
+  err "请检查 C-to-C 线、iPhone 是否解锁并已点【信任此电脑】，必要时拔插 iPhone 后重试"
+  return 1
 }
 
 su_direct_start() {
@@ -271,8 +344,9 @@ cmd_relay() {
   case "$sub" in
     start)  cmd_relay_start ;;
     stop)   cmd_relay_stop ;;
+    ensure) cmd_relay_ensure "${2:-}" ;;
     status) title "===== 中继状态 ====="; cmd_relay_status ;;
-    *) err "未知 relay 子命令: $sub (start|stop|status)"; exit 1 ;;
+    *) err "未知 relay 子命令: $sub (start|stop|status|ensure)"; exit 1 ;;
   esac
 }
 
@@ -300,7 +374,7 @@ case "$CMD" in
   sign)    cmd_sign ;;
   push)    cmd_push "${1:-}" ;;
   deploy)  cmd_deploy ;;
-  relay)   cmd_relay "${1:-status}" ;;
+  relay)   cmd_relay "${1:-status}" "${2:-}" ;;
   clean)   cmd_clean ;;
   -h|--help|help|"") usage ;;
   *) err "未知子命令: $CMD"; echo ""; usage ;;

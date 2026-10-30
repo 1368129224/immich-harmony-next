@@ -130,38 +130,12 @@ if [[ "$ADB_STATE" != "device" ]]; then
 fi
 echo "✅ 安卓中继节点 ADB 已就绪。"
 
-# Step 4: Inspect & Fix Type-C Role (Host vs Device) and Configuration
-echo "🔍 正在巡检安卓端的 USB 物理连接与 Type-C 角色..."
-ROLES="$(adb -s "$ADB_TARGET" shell "su -c 'cat /sys/class/typec/port0/data_role 2>/dev/null || true'")"
-
-if echo "$ROLES" | grep -q "\[device\]"; then
-  echo "⚠️  检测到安卓处于 [device] (从机) 模式，正在自动切换为 [host] (主机) 模式..."
-  adb -s "$ADB_TARGET" shell "su -c 'echo source > /sys/class/typec/port0/power_role 2>/dev/null; sleep 1; echo host > /sys/class/typec/port0/data_role 2>/dev/null || true'"
-  sleep 1
-fi
-
-# 精准查找 Apple 设备 (idVendor=05ac) 并切换为配置 4 (MUX 调试通信模式)
-NEED_RESTART_USBMUXD="$(adb -s "$ADB_TARGET" shell "su -c '
-CHANGED=0
-for dev in /sys/bus/usb/devices/*; do
-  if [ -f \"\$dev/idVendor\" ] && [ \"\$(cat \"\$dev/idVendor\" 2>/dev/null)\" = \"05ac\" ]; then
-    CURR=\$(cat \"\$dev/bConfigurationValue\" 2>/dev/null || echo 0)
-    if [ \"\$CURR\" != \"4\" ]; then
-      echo 4 > \"\$dev/bConfigurationValue\" 2>/dev/null || true
-      CHANGED=1
-    fi
-  fi
-done
-chmod -R 777 /dev/bus/usb 2>/dev/null || true
-echo \$CHANGED
-'" | tr -d '\r\n ')"
-
-# 检查 usbmuxd 是否存活，若配置刚切换或进程缺失则重启
-USBMUXD_RUNNING="$(adb -s "$ADB_TARGET" shell "ps -ef | grep 'usbmuxd' | grep -v grep | wc -l" | tr -d '\r\n ')"
-if [[ "$NEED_RESTART_USBMUXD" == "1" ]] || [[ "$USBMUXD_RUNNING" == "0" ]]; then
-  echo "⚙️  正在安卓端初始化/重启 usbmuxd 守护进程..."
-  adb -s "$ADB_TARGET" shell "su -c 'killall usbmuxd 2>/dev/null; chmod -R 777 /dev/bus/usb; PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- usbmuxd -f -v >/data/local/tmp/usbmuxd.log 2>&1 &'"
-  sleep 2
+# Step 4: Ensure the relay (Type-C host role, USB config 4, usbmuxd) is healthy.
+# Delegated to ios.sh so there is a single, correctly ordered recovery path
+# (same as `ios.sh relay start`). ios.sh push/deploy already did this: skip then.
+if [[ "${RELAY_ENSURED:-0}" != "1" ]]; then
+  echo "🔍 正在检查并自动恢复安卓中继 (relay ensure)..."
+  ADB_TARGET="$ADB_TARGET" bash "$ROOT/scripts/entry/ios.sh" relay ensure || exit 1
 fi
 
 # Step 5: Query iPhone info via Android proot pymobiledevice3 (带一次自愈重试)
@@ -169,9 +143,8 @@ echo "📱 正在握手查询已连接的 iPhone..."
 DEVICE_INFO="$(adb -s "$ADB_TARGET" shell "su -c 'PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- pymobiledevice3 lockdown info 2>/dev/null || true'" | tr -d '\r')"
 
 if [[ -z "$DEVICE_INFO" ]] || echo "$DEVICE_INFO" | grep -qi "No device connected" || echo "$DEVICE_INFO" | grep -qi "Device is not connected"; then
-  echo "🔄 正在尝试重新激活 USB 通信管道..."
-  adb -s "$ADB_TARGET" shell "su -c 'killall usbmuxd 2>/dev/null; chmod -R 777 /dev/bus/usb; PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- usbmuxd -f -v >/data/local/tmp/usbmuxd.log 2>&1 &'"
-  sleep 2
+  echo "🔄 握手失败，强制重启中继后重试..."
+  ADB_TARGET="$ADB_TARGET" bash "$ROOT/scripts/entry/ios.sh" relay ensure --force || true
   DEVICE_INFO="$(adb -s "$ADB_TARGET" shell "su -c 'PATH=/data/data/com.termux/files/usr/bin:\$PATH proot-distro login ubuntu -- pymobiledevice3 lockdown info 2>/dev/null || true'" | tr -d '\r')"
 fi
 

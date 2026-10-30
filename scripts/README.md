@@ -94,7 +94,7 @@ bash scripts/update_livecontainer_ipa.sh feat/xxx    # 指定分支
 ./scripts/entry/ios.sh sign              # Immich-unsigned.ipa → Immich-signed.ipa（zsign）
 ./scripts/entry/ios.sh push [ipa]        # 推送到 iPhone 并启动（默认 Immich-signed.ipa）
 ./scripts/entry/ios.sh deploy            # sign + push ⭐
-./scripts/entry/ios.sh relay status|start|stop
+./scripts/entry/ios.sh relay status|start|stop|ensure   # push/deploy 已自动 ensure，无需手动 start
 ./scripts/entry/ios.sh clean             # 清理 IPA 目录下的 .download.* 临时目录
 ```
 
@@ -201,6 +201,6 @@ bash ios_cert_tool.sh backup
 | `zsign: command not found` | 按 3.2 节安装到 `~/.local/bin` |
 | `未设置 P12_PASSWORD` / p12 无法解开 | 在 `.tunnel.env` 中设置正确的 `P12_PASSWORD` |
 | 安卓中继不可达 | 检查安卓端的 Tailscale 连接和网络 ADB（5555）授权 |
-| iPhone 未识别 / `DeviceList` 为空 | `entry/ios.sh relay status`；检查 C-to-C 线和「信任此电脑」；运行 `entry/ios.sh relay start` 按正确顺序重启 |
+| iPhone 未识别 / `DeviceList` 为空 | `push` / `deploy` 会自动探测并恢复中继（同步脚本 → 重启 → 等待枚举，最多 3 次）；仍失败时检查 C-to-C 线和「信任此电脑」，可手动 `entry/ios.sh relay ensure --force` |
 | iPhone 反复弹出「信任此电脑」 | 信任判断同时看 HostID 与 SystemBUID，两者由 `start_ios_relay.sh` 固定在 proot 内的 `/var/lib/lockdown/SystemConfiguration.plist`；确认安卓上部署的是最新版脚本，再运行 `entry/ios.sh relay start` |
 | 安装成功但 App 闪退 | 描述文件已过期（7 天），续期后重新 `deploy` |
