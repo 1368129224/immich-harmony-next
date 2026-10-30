@@ -4156,6 +4156,15 @@ private struct NativeViewerDismissSurface<Pager: View, Chrome: View>: View {
         pagerOpacity = 0
       }
     }
+    // The card is aspect-fit and the grid cell is a square crop, so the two never
+    // match exactly. Landing on the thumbnail and then tearing the cover down made the
+    // card "pop" out at the end. Cross-fade the card away over the final stretch of the
+    // flight instead, finishing together with the geometry animation (0.32 s).
+    if target != nil {
+      withAnimation(.easeIn(duration: 0.16).delay(0.14)) {
+        pagerOpacity = 0
+      }
+    }
   }
 }
 
